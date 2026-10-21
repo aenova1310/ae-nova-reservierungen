@@ -1,6 +1,7 @@
 import type { Locale } from "../messages";
 import { common } from "./common";
 import { floorplan } from "./floorplan";
+import { live } from "./live";
 import { reservations } from "./reservations";
 import { setup } from "./setup";
 import { stats } from "./stats";
@@ -10,8 +11,8 @@ import { stats } from "./stats";
  * Schlüssel sind mit dem Bereich vorangestellt ("tables.…", "res.…"), damit
  * keine Überschneidungen entstehen.
  */
-const de = { ...common.de, ...reservations.de, ...setup.de, ...floorplan.de, ...stats.de };
-const en: Record<keyof typeof de, string> = { ...common.en, ...reservations.en, ...setup.en, ...floorplan.en, ...stats.en };
+const de = { ...common.de, ...reservations.de, ...setup.de, ...floorplan.de, ...stats.de, ...live.de };
+const en: Record<keyof typeof de, string> = { ...common.en, ...reservations.en, ...setup.en, ...floorplan.en, ...stats.en, ...live.en };
 
 export type AdminKey = keyof typeof de;
 export type AdminMessages = Record<AdminKey, string>;
