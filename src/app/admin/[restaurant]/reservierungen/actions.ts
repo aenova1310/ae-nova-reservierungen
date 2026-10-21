@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { z } from "zod";
+import { msg } from "@/i18n/admin";
 import type { ActionResult } from "@/lib/action-result";
 import { isLocalDate, isLocalTime } from "@/server/availability/time";
 import { dispatchEmails } from "@/server/email/outbox";
@@ -15,14 +16,14 @@ import { requireRestaurantAccess } from "@/server/tenancy/access";
 const refresh = (slug: string) => revalidatePath(`/admin/${slug}`, "layout");
 
 const manualSchema = z.object({
-  date: z.string().refine(isLocalDate, "Ungültiges Datum"),
-  time: z.string().refine(isLocalTime, "Ungültige Uhrzeit"),
-  partySize: z.coerce.number().int().min(1, "Mindestens 1").max(200),
+  date: z.string().refine(isLocalDate, msg("res.v.date")),
+  time: z.string().refine(isLocalTime, msg("res.v.time")),
+  partySize: z.coerce.number().int().min(1, msg("common.v.min", { min: 1 })).max(200),
   seat: z.string().optional(),
   source: z.enum(["PHONE", "WALK_IN", "ADMIN"]),
-  name: z.string().min(1, "Bitte Namen angeben").max(120),
+  name: z.string().min(1, msg("res.v.name")).max(120),
   phone: z.string().max(40).optional(),
-  email: z.string().email("Ungültige E-Mail").optional(),
+  email: z.string().email(msg("res.v.email")).optional(),
   notes: z.string().max(1000).optional(),
   internalNotes: z.string().max(1000).optional(),
   durationMinutes: z.coerce.number().int().min(15).max(600).optional(),
@@ -31,7 +32,7 @@ const manualSchema = z.object({
 
 /** Telefonische Reservierung oder Walk-in erfassen. */
 export async function createManualReservationAction(slug: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { restaurant, user } = await requireRestaurantAccess(slug);
     const data = manualSchema.parse(formObject(formData));
     const [kind, id] = data.seat?.split(":") ?? [];
@@ -51,24 +52,24 @@ export async function createManualReservationAction(slug: string, _prev: ActionR
     });
     after(() => dispatchEmails(created.emailIds));
     refresh(slug);
-    return `Reservierung ${created.code} angelegt – Tisch ${created.tableNames.join(" + ")}.`;
+    return t("res.created", { code: created.code, tables: created.tableNames.join(" + ") });
   });
 }
 
 export async function changeStatusAction(slug: string, reservationId: string, to: ReservationStatus) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { restaurant, user } = await requireRestaurantAccess(slug);
     const { emailIds } = await changeReservationStatus({ restaurantId: restaurant.id, reservationId, to, userId: user.id });
     after(() => dispatchEmails(emailIds));
     refresh(slug);
-    return "Status geändert.";
+    return t("res.statusChanged");
   });
 }
 
 const cancelSchema = z.object({ reason: z.string().max(500).optional(), notifyGuest: z.literal("on").optional() });
 
 export async function cancelByRestaurantAction(slug: string, reservationId: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { restaurant, user } = await requireRestaurantAccess(slug);
     const data = cancelSchema.parse(formObject(formData));
     const { emailIds } = await cancelReservation({
@@ -81,42 +82,42 @@ export async function cancelByRestaurantAction(slug: string, reservationId: stri
     });
     after(() => dispatchEmails(emailIds));
     refresh(slug);
-    return "Reservierung storniert, Tisch freigegeben.";
+    return t("res.cancelled");
   });
 }
 
 const modifySchema = z.object({
-  date: z.string().refine(isLocalDate, "Ungültiges Datum"),
-  time: z.string().refine(isLocalTime, "Ungültige Uhrzeit"),
+  date: z.string().refine(isLocalDate, msg("res.v.date")),
+  time: z.string().refine(isLocalTime, msg("res.v.time")),
   partySize: z.coerce.number().int().min(1).max(200),
 });
 
 export async function modifyByRestaurantAction(slug: string, reservationId: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { restaurant, user } = await requireRestaurantAccess(slug);
     const data = modifySchema.parse(formObject(formData));
     const { emailIds } = await modifyReservation({ reservationId, restaurantId: restaurant.id, ...data, by: "RESTAURANT", userId: user.id });
     after(() => dispatchEmails(emailIds));
     refresh(slug);
-    return "Reservierung geändert.";
+    return t("res.modified");
   });
 }
 
 export async function updateInternalNotesAction(slug: string, reservationId: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { tdb } = await requireRestaurantAccess(slug);
     const notes = z.string().max(1000).optional().parse(formObject(formData).internalNotes);
     await tdb.reservation.update({ where: { id: reservationId }, data: { internalNotes: notes ?? null } });
     refresh(slug);
-    return "Notiz gespeichert.";
+    return t("res.noteSaved");
   });
 }
 
 export async function releaseTablesAction(slug: string, reservationId: string) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { restaurant, user } = await requireRestaurantAccess(slug);
     await releaseTablesNow({ restaurantId: restaurant.id, reservationId, userId: user.id });
     refresh(slug);
-    return "Tisch freigegeben.";
+    return t("res.tablesReleased");
   });
 }

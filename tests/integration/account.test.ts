@@ -34,7 +34,7 @@ async function owner(slug: string, planCode: "BASIC" | "PRO" = "PRO") {
   const user = await db.user.create({
     data: { email: `inhaber@${slug}.test`, name: "Ina Haber", passwordHash: await hashPassword("altes-passwort-1"), memberships: { create: { organizationId: org.id, role: "OWNER" } } },
   });
-  const ctx = { organizationId: org.id, restaurantId: restaurant.id, restaurantName: restaurant.name, planCode, invitedByName: "Ina Haber" };
+  const ctx = { organizationId: org.id, restaurantId: restaurant.id, restaurantName: restaurant.name, planCode, invitedByName: "Ina Haber", locale: "de" as const };
   return { restaurant, org, user, ctx };
 }
 
@@ -72,7 +72,7 @@ describe("Passwort vergessen", () => {
     expect(await resetTokenEmail(first)).toBeNull();
     expect(await resetTokenEmail(second)).toBe("inhaber@reset2.test");
     await db.passwordResetToken.updateMany({ data: { expiresAt: new Date(Date.now() - 1000) } });
-    await expect(resetPassword(second, "neues-passwort-1")).rejects.toThrow(/ungültig oder abgelaufen/);
+    await expect(resetPassword(second, "neues-passwort-1")).rejects.toThrow(/account.err.resetInvalid/);
   });
 
   it("ignoriert gesperrte Konten", async () => {
@@ -92,7 +92,7 @@ describe("Einladungen", () => {
     const token = tokenFrom(sent[0]);
 
     expect(await invitationView(token)).toMatchObject({ email: "neu@example.test", role: "STAFF", existingAccount: false });
-    await expect(acceptInvitation(token, { password: "passwort-neu-1" })).rejects.toThrow(/Namen/);
+    await expect(acceptInvitation(token, { password: "passwort-neu-1" })).rejects.toThrow(/account.err.nameMissing/);
     const result = await acceptInvitation(token, { name: "Nina Neu", password: "passwort-neu-1" });
     expect(result.slug).toBe("team");
     const member = await db.membership.findFirstOrThrow({ where: { userId: result.userId } });
@@ -100,7 +100,7 @@ describe("Einladungen", () => {
 
     await expect(acceptInvitation(token, { name: "X", password: "passwort-neu-1" })).rejects.toBeInstanceOf(AccountError);
     expect(await invitationView(token)).toBeNull();
-    await expect(inviteMember(ctx, "neu@example.test", "STAFF")).rejects.toThrow(/bereits Zugang/);
+    await expect(inviteMember(ctx, "neu@example.test", "STAFF")).rejects.toThrow(/account.err.(alreadyMember|alreadyHasAccess)/);
   });
 
   it("verlangt bei bestehendem Konto das richtige Passwort", async () => {
@@ -109,7 +109,7 @@ describe("Einladungen", () => {
     await inviteMember(b.ctx, a.user.email, "OWNER");
     const token = tokenFrom(sent[0]);
     expect((await invitationView(token))?.existingAccount).toBe(true);
-    await expect(acceptInvitation(token, { password: "falsch-falsch" })).rejects.toThrow(/Passwort/);
+    await expect(acceptInvitation(token, { password: "falsch-falsch" })).rejects.toThrow(/account.err.wrongPassword/);
     await acceptInvitation(token, { password: "altes-passwort-1" });
     expect(await db.membership.count({ where: { userId: a.user.id } })).toBe(2);
     // Passwort wurde nicht verändert
@@ -118,7 +118,7 @@ describe("Einladungen", () => {
 
   it("beachtet das Tariflimit inklusive offener Einladungen", async () => {
     const basic = await owner("basic", "BASIC");
-    await expect(inviteMember(basic.ctx, "x@example.test", "STAFF")).rejects.toThrow(/Basic-Tarif/);
+    await expect(inviteMember(basic.ctx, "x@example.test", "STAFF")).rejects.toThrow(/account.err.basicLimit/);
     expect(sent).toHaveLength(0);
   });
 
@@ -143,7 +143,7 @@ describe("Einladungen", () => {
     await inviteMember(ctx, "erneuern@example.test", "STAFF");
     const oldToken = tokenFrom(sent[0]);
     failNext = 1;
-    await expect(inviteMember(ctx, "erneuern@example.test", "STAFF")).rejects.toThrow(/nicht gesendet/);
+    await expect(inviteMember(ctx, "erneuern@example.test", "STAFF")).rejects.toThrow(/account.err.mailFailed/);
     expect(await invitationView(oldToken)).not.toBeNull();
     expect(await db.invitation.count()).toBe(1);
   });
@@ -152,7 +152,7 @@ describe("Einladungen", () => {
     const { ctx, restaurant } = await owner("downgrade");
     await inviteMember(ctx, "spaet@example.test", "STAFF");
     await db.restaurant.update({ where: { id: restaurant.id }, data: { planCode: "BASIC" } });
-    await expect(acceptInvitation(tokenFrom(sent[0]), { name: "Spät", password: "passwort-neu-1" })).rejects.toThrow(/Tarif/);
+    await expect(acceptInvitation(tokenFrom(sent[0]), { name: "Spät", password: "passwort-neu-1" })).rejects.toThrow(/account.err.planFull/);
     expect(await db.user.count({ where: { email: "spaet@example.test" } })).toBe(0); // zurückgerollt
 
     const a = await owner("doppelt-a");
@@ -160,19 +160,19 @@ describe("Einladungen", () => {
     await inviteMember(b.ctx, a.user.email, "STAFF");
     const token = tokenFrom(sent.at(-1)!);
     await db.membership.create({ data: { userId: a.user.id, organizationId: b.org.id, role: "OWNER" } });
-    await expect(acceptInvitation(token, { password: "altes-passwort-1" })).rejects.toThrow(/bereits Zugang/);
+    await expect(acceptInvitation(token, { password: "altes-passwort-1" })).rejects.toThrow(/account.err.(alreadyMember|alreadyHasAccess)/);
   });
 
   it("begrenzt Einladungen je Betrieb (kein Mail-Relais)", async () => {
     const { ctx } = await owner("relais");
     for (let i = 0; i < INVITE_LIMITS.perOrgPerHour; i++) await inviteMember(ctx, `p${i}@relais.test`, "STAFF");
-    await expect(inviteMember(ctx, "zuviel@relais.test", "STAFF")).rejects.toThrow(/Zu viele Einladungen/);
+    await expect(inviteMember(ctx, "zuviel@relais.test", "STAFF")).rejects.toThrow(/account.err.tooManyInvites/);
   });
 
   it("legt bei Versandfehler keine Einladung an und protokolliert ohne Nachversand", async () => {
     const { ctx } = await owner("fehler");
     failNext = 1;
-    await expect(inviteMember(ctx, "fehler@example.test", "STAFF")).rejects.toThrow(/nicht gesendet/);
+    await expect(inviteMember(ctx, "fehler@example.test", "STAFF")).rejects.toThrow(/account.err.mailFailed/);
     expect(await db.invitation.count()).toBe(0);
     const log = await db.emailLog.findFirstOrThrow({ where: { type: "STAFF_INVITATION" } });
     expect(log).toMatchObject({ status: "FAILED", providerMessageId: "direct" });

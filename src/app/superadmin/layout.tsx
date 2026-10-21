@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { logoutAction } from "@/app/admin/login/actions";
+import { AdminI18nProvider } from "@/components/admin/i18n-provider";
+import { ADMIN_MESSAGES } from "@/i18n/admin";
 import { requireSuperAdmin } from "@/server/tenancy/access";
 
 export const metadata: Metadata = { title: "Super-Admin", robots: { index: false } };
@@ -13,7 +15,9 @@ const NAV = [
 
 export default async function SuperAdminLayout({ children }: LayoutProps<"/superadmin">) {
   const user = await requireSuperAdmin();
+  // Anbieter-Bereich ist bewusst nur deutsch (interne Oberfläche); gemeinsame Komponenten brauchen den Provider
   return (
+    <AdminI18nProvider locale="de" messages={ADMIN_MESSAGES.de}>
     <div className="min-h-dvh">
       <header className="border-b bg-[#1d2433] text-white">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-8">
@@ -33,5 +37,6 @@ export default async function SuperAdminLayout({ children }: LayoutProps<"/super
       </header>
       <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-8">{children}</main>
     </div>
+    </AdminI18nProvider>
   );
 }

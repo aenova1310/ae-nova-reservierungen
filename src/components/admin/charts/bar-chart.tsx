@@ -1,6 +1,8 @@
 "use client";
 
 import { useState } from "react";
+import { useAdminT } from "@/components/admin/i18n-provider";
+import { formatNumber } from "@/i18n/admin/format";
 import { cn } from "@/lib/utils";
 
 export interface BarDatum {
@@ -44,8 +46,9 @@ export function BarChart({
   axis?: "number" | "percent";
   height?: number;
 }) {
+  const { locale } = useAdminT();
   const formatAxis = (v: number) =>
-    axis === "percent" ? `${Math.round(v * 100)} %` : v.toLocaleString("de-DE", { maximumFractionDigits: 1 });
+    axis === "percent" ? `${Math.round(v * 100)} %` : formatNumber(v, locale, { maximumFractionDigits: 1 });
   const [active, setActive] = useState<number | null>(null);
   const max = niceMax(Math.max(0, ...data.map((d) => d.value ?? 0)));
   // Zählwerte nur mit ganzzahligen Hilfslinien beschriften
@@ -53,7 +56,7 @@ export function BarChart({
   const labelEvery = Math.max(1, Math.ceil(data.length / 5));
   // Kurzwert für die Direktbeschriftung (nur Zahl, ohne Einheit-Text)
   const short = (v: number) =>
-    axis === "percent" ? `${(v * 100).toLocaleString("de-DE", { maximumFractionDigits: 1 })} %` : v.toLocaleString("de-DE");
+    axis === "percent" ? `${formatNumber(v * 100, locale, { maximumFractionDigits: 1 })} %` : formatNumber(v, locale);
   const last = data.length - 1;
 
   return (

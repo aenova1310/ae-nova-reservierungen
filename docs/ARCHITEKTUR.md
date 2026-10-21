@@ -325,8 +325,17 @@ Alle Jobs sind idempotent und laufen pro Batch in Transaktionen.
 
 `next-intl`. Im Widget steht die Sprache **in der URL** (`?lang=en`), sie wird nicht in einem
 Cookie gespeichert. Der Sprachumschalter ist ein Link. E-Mails gehen in der Sprache, in der
-gebucht wurde (`reservation.locale`). Der Admin ist im MVP auf Deutsch, die englische Fassung
-folgt in Phase 3.
+gebucht wurde (`reservation.locale`).
+
+**Verwaltung (umgesetzt in Phase 3):** Deutsch und Englisch, je Benutzer gespeichert (`users.locale`),
+umschaltbar in der Seitenleiste und auf den Anmeldeseiten (dort per Cookie, sonst Browser-Sprache).
+Wörterbücher je Bereich in `src/i18n/admin/*` (`defineMessages`: der englische Teil muss exakt
+dieselben Schlüssel haben – sonst Typfehler). Server-Komponenten nutzen `getAdminT()`, Client-
+Komponenten `useAdminT()`; der Server übergibt nur das Wörterbuch der aktiven Sprache. Fehler-
+und Zod-Meldungen sind Schlüssel (`msg("…", vars)`) und werden in `runAction` übersetzt.
+Konto-Mails (Passwort, Einladung) gehen in der Sprache des Benutzers bzw. der einladenden Person.
+Bewusst deutsch bleiben: Super-Admin (interne Anbieter-Oberfläche) und Benachrichtigungs-Mails an
+die Restaurant-Adresse.
 
 ### 3.13 Hosting (EU)
 

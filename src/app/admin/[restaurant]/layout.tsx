@@ -1,27 +1,30 @@
 import Link from "next/link";
 import { logoutAction } from "@/app/admin/login/actions";
 import { AdminNav, type NavItem } from "@/components/admin/admin-nav";
+import { LanguageSwitch } from "@/components/admin/language-switch";
 import { MobileNav } from "@/components/admin/mobile-nav";
 import { Badge } from "@/components/ui/badge";
+import { getAdminT } from "@/server/i18n";
 import { accessibleRestaurants, requireRestaurantAccess } from "@/server/tenancy/access";
 
 const NAV: NavItem[] = [
-  { href: "", label: "Heute", icon: "today" },
-  { href: "/reservierungen", label: "Reservierungen", icon: "list" },
-  { href: "/timeline", label: "Tagesplan", icon: "timeline" },
-  { href: "/statistik", label: "Statistik", icon: "stats" },
-  { href: "/tische", label: "Tische & Bereiche", icon: "tables" },
-  { href: "/raumplan", label: "Raumplan", icon: "floorplan" },
-  { href: "/oeffnungszeiten", label: "Öffnungszeiten", icon: "hours" },
-  { href: "/einstellungen", label: "Einstellungen", icon: "settings", ownerOnly: true },
-  { href: "/einbinden", label: "Website-Einbindung", icon: "embed" },
-  { href: "/datenschutz", label: "Datenschutz", icon: "privacy", ownerOnly: true },
-  { href: "/team", label: "Team", icon: "team", ownerOnly: true },
+  { href: "", label: "nav.today", icon: "today" },
+  { href: "/reservierungen", label: "nav.reservations", icon: "list" },
+  { href: "/timeline", label: "nav.timeline", icon: "timeline" },
+  { href: "/statistik", label: "nav.stats", icon: "stats" },
+  { href: "/tische", label: "nav.tables", icon: "tables" },
+  { href: "/raumplan", label: "nav.floorplan", icon: "floorplan" },
+  { href: "/oeffnungszeiten", label: "nav.hours", icon: "hours" },
+  { href: "/einstellungen", label: "nav.settings", icon: "settings", ownerOnly: true },
+  { href: "/einbinden", label: "nav.embed", icon: "embed" },
+  { href: "/datenschutz", label: "nav.privacy", icon: "privacy", ownerOnly: true },
+  { href: "/team", label: "nav.team", icon: "team", ownerOnly: true },
 ];
 
 export default async function RestaurantAdminLayout(props: LayoutProps<"/admin/[restaurant]">) {
   const { restaurant: slug } = await props.params;
   const { user, role, restaurant } = await requireRestaurantAccess(slug);
+  const { t } = await getAdminT();
   const items = NAV.filter((i) => !i.ownerOnly || role === "OWNER");
   const others = (await accessibleRestaurants(user)).filter((r) => r.slug !== slug);
   const base = `/admin/${slug}`;
@@ -30,7 +33,7 @@ export default async function RestaurantAdminLayout(props: LayoutProps<"/admin/[
     <div className="space-y-3 px-3 text-sm">
       {others.length > 0 ? (
         <details>
-          <summary className="cursor-pointer text-muted-foreground">Restaurant wechseln</summary>
+          <summary className="cursor-pointer text-muted-foreground">{t("nav.switchRestaurant")}</summary>
           <ul className="mt-2 space-y-1">
             {others.slice(0, 8).map((r) => (
               <li key={r.slug}>
@@ -44,16 +47,17 @@ export default async function RestaurantAdminLayout(props: LayoutProps<"/admin/[
       ) : null}
       <p className="truncate text-muted-foreground" title={user.email}>
         {user.name ?? user.email}
-        <span className="block text-xs">{role === "OWNER" ? "Inhaber/in" : "Mitarbeiter/in"}</span>
+        <span className="block text-xs">{t(`common.role.${role}`)}</span>
       </p>
       {user.platformRole === "SUPER_ADMIN" ? (
         <Link href="/superadmin" className="block text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-          Zur Anbieter-Übersicht
+          {t("nav.superadmin")}
         </Link>
       ) : null}
+      <LanguageSwitch />
       <form action={logoutAction}>
         <button type="submit" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-          Abmelden
+          {t("nav.logout")}
         </button>
       </form>
     </div>
@@ -68,7 +72,7 @@ export default async function RestaurantAdminLayout(props: LayoutProps<"/admin/[
             <Badge variant="secondary" className="font-normal">
               {restaurant.planCode === "PRO" ? "Pro" : "Basic"}
             </Badge>
-            {restaurant.status === "SUSPENDED" ? <Badge variant="destructive">Gesperrt</Badge> : null}
+            {restaurant.status === "SUSPENDED" ? <Badge variant="destructive">{t("nav.suspended")}</Badge> : null}
           </div>
         </div>
         <AdminNav base={base} items={items} />

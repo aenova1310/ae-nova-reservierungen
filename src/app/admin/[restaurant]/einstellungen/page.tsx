@@ -6,8 +6,9 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { getTranslator } from "@/i18n/messages";
-import { WIDGET_FONTS } from "@/lib/fonts";
+import { WIDGET_FONTS, type WidgetFontKey } from "@/lib/fonts";
 import { db } from "@/server/db";
+import { getAdminT } from "@/server/i18n";
 import { hasFeature } from "@/server/plans/features";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 import { REMINDER_HOURS_OPTIONS } from "@/server/email/reminders";
@@ -19,72 +20,76 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
   const { restaurant: slug } = await props.params;
   const { restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
   const full = await db.restaurant.findUniqueOrThrow({ where: { id: restaurant.id }, include: { settings: true, branding: true } });
+  const { t } = await getAdminT();
   const s = full.settings!;
   const b = full.branding;
-  const defaultPrivacy = getTranslator("de")("privacy.default", { restaurant: full.name, days: s.anonymizeAfterDays });
+  // Platzhalter = Standardtext für Gäste in der Sprache des jeweiligen Feldes (nicht der Admin-Sprache)
+  const privacyVars = { restaurant: full.name, days: s.anonymizeAfterDays };
+  const defaultPrivacyDe = getTranslator("de")("privacy.default", privacyVars);
+  const defaultPrivacyEn = getTranslator("en")("privacy.default", privacyVars);
 
   return (
     <>
-      <PageHeader title="Einstellungen" description="Gelten sofort für das Online-Widget." />
+      <PageHeader title={t("settings.title")} description={t("settings.desc")} />
       <div className="space-y-6">
-        <Section title="Buchungsregeln">
+        <Section title={t("settings.rules")}>
           <ActionForm action={saveBookingRulesAction.bind(null, slug)} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <Field label="Tischvergabe" htmlFor="allocationMode" hint="Bei „Gast wählt“ sieht der Gast freie Tische je Bereich.">
+            <Field label={t("settings.allocation")} htmlFor="allocationMode" hint={t("settings.allocationHint")}>
               <select id="allocationMode" name="allocationMode" defaultValue={s.allocationMode} className={selectClass}>
-                <option value="AUTOMATIC">Automatisch (Gast wählt höchstens den Bereich)</option>
-                <option value="GUEST_CHOOSES_TABLE">Gast wählt Bereich und Tisch</option>
+                <option value="AUTOMATIC">{t("settings.allocation.AUTOMATIC")}</option>
+                <option value="GUEST_CHOOSES_TABLE">{t("settings.allocation.GUEST_CHOOSES_TABLE")}</option>
               </select>
             </Field>
-            <Field label="Bestätigung" htmlFor="confirmationMode" hint="Bei manueller Freigabe bleibt der Tisch bis zur Entscheidung blockiert.">
+            <Field label={t("settings.confirmation")} htmlFor="confirmationMode" hint={t("settings.confirmationHint")}>
               <select id="confirmationMode" name="confirmationMode" defaultValue={s.confirmationMode} className={selectClass}>
-                <option value="AUTOMATIC">Automatisch bestätigen</option>
-                <option value="MANUAL">Manuell freigeben</option>
+                <option value="AUTOMATIC">{t("settings.confirmation.AUTOMATIC")}</option>
+                <option value="MANUAL">{t("settings.confirmation.MANUAL")}</option>
               </select>
             </Field>
-            <Field label="Online-Kontingent (%)" htmlFor="onlineQuotaPercent" hint="Anteil der Plätze, der gleichzeitig online belegt sein darf.">
+            <Field label={t("settings.quota")} htmlFor="onlineQuotaPercent" hint={t("settings.quotaHint")}>
               <Input id="onlineQuotaPercent" name="onlineQuotaPercent" type="number" min={0} max={100} defaultValue={s.onlineQuotaPercent} />
             </Field>
-            <Field label="Slot-Raster (Minuten)" htmlFor="slotIntervalMinutes">
+            <Field label={t("settings.slotInterval")} htmlFor="slotIntervalMinutes">
               <Input id="slotIntervalMinutes" name="slotIntervalMinutes" type="number" min={5} step={5} defaultValue={s.slotIntervalMinutes} />
             </Field>
-            <Field label="Puffer nach jeder Buchung (Minuten)" htmlFor="bufferMinutes" hint="Zeit zum Abräumen und Eindecken.">
+            <Field label={t("settings.buffer")} htmlFor="bufferMinutes" hint={t("settings.bufferHint")}>
               <Input id="bufferMinutes" name="bufferMinutes" type="number" min={0} step={5} defaultValue={s.bufferMinutes} />
             </Field>
-            <Field label="Vorlaufzeit (Minuten)" htmlFor="minLeadTimeMinutes" hint="So kurzfristig darf online gebucht werden.">
+            <Field label={t("settings.leadTime")} htmlFor="minLeadTimeMinutes" hint={t("settings.leadTimeHint")}>
               <Input id="minLeadTimeMinutes" name="minLeadTimeMinutes" type="number" min={0} step={15} defaultValue={s.minLeadTimeMinutes} />
             </Field>
-            <Field label="Max. Tage im Voraus" htmlFor="maxAdvanceDays">
+            <Field label={t("settings.maxAdvance")} htmlFor="maxAdvanceDays">
               <Input id="maxAdvanceDays" name="maxAdvanceDays" type="number" min={1} defaultValue={s.maxAdvanceDays} />
             </Field>
-            <Field label="Mindestgröße online" htmlFor="minPartySize">
+            <Field label={t("settings.minParty")} htmlFor="minPartySize">
               <Input id="minPartySize" name="minPartySize" type="number" min={1} defaultValue={s.minPartySize} />
             </Field>
-            <Field label="Höchstgröße online" htmlFor="maxPartySizeOnline" hint="Größere Gruppen sehen Ihre Telefonnummer." error="maxPartySizeOnline">
+            <Field label={t("settings.maxParty")} htmlFor="maxPartySizeOnline" hint={t("settings.maxPartyHint")} error="maxPartySizeOnline">
               <Input id="maxPartySizeOnline" name="maxPartySizeOnline" type="number" min={1} defaultValue={s.maxPartySizeOnline} />
             </Field>
             <div className="sm:col-span-2 lg:col-span-3">
-              <SubmitButton>Buchungsregeln speichern</SubmitButton>
+              <SubmitButton>{t("settings.saveRules")}</SubmitButton>
             </div>
           </ActionForm>
         </Section>
 
-        <Section title="Erinnerung per E-Mail" description="Gäste mit E-Mail-Adresse erhalten vor dem Besuch eine kurze Erinnerung mit Link zum Ändern oder Stornieren. Das senkt nachweislich die No-Show-Quote.">
+        <Section title={t("settings.reminder")} description={t("settings.reminderDesc")}>
           <ActionForm action={saveReminderAction.bind(null, slug)} className="flex flex-wrap items-end gap-4">
-            <Field label="Erinnerung senden" htmlFor="reminder" hint="Wer kurzfristiger bucht, erhält keine Erinnerung (die Bestätigung ist dann gerade erst angekommen).">
+            <Field label={t("settings.reminderSend")} htmlFor="reminder" hint={t("settings.reminderHint")}>
               <select id="reminder" name="reminder" defaultValue={s.reminderEnabled ? String(s.reminderHoursBefore) : "off"} className={selectClass}>
-                <option value="off">Keine Erinnerung</option>
+                <option value="off">{t("settings.reminderOff")}</option>
                 {REMINDER_HOURS_OPTIONS.map((h) => (
                   <option key={h} value={h}>
-                    {h} Stunden vorher
+                    {t("settings.reminderHours", { count: h })}
                   </option>
                 ))}
               </select>
             </Field>
-            <SubmitButton>Speichern</SubmitButton>
+            <SubmitButton>{t("common.save")}</SubmitButton>
           </ActionForm>
         </Section>
 
-        <Section title="Logo" description="Erscheint im Kopf des Widgets anstelle des Restaurantnamens.">
+        <Section title={t("settings.logo")} description={t("settings.logoDesc")}>
           <LogoSettings
             slug={slug}
             restaurantName={full.name}
@@ -93,75 +98,75 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
         </Section>
 
         <Section
-          title="Erscheinungsbild des Widgets"
-          description={hasFeature(full.planCode, "removePoweredBy") ? "Pro: ohne „powered by“-Hinweis." : "Im Basic-Tarif steht ein dezenter „powered by“-Hinweis im Widget."}
+          title={t("settings.branding")}
+          description={hasFeature(full.planCode, "removePoweredBy") ? t("settings.brandingPro") : t("settings.brandingBasic")}
         >
           <ActionForm action={saveBrandingAction.bind(null, slug)} className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-            <Field label="Primärfarbe" htmlFor="primaryColor" error="primaryColor">
+            <Field label={t("settings.primaryColor")} htmlFor="primaryColor" error="primaryColor">
               <div className="flex gap-2">
-                <input type="color" aria-label="Farbe wählen" defaultValue={b?.primaryColor ?? "#6B1E2E"} className="h-9 w-12 cursor-pointer rounded-md border" name="primaryColor" />
+                <input type="color" aria-label={t("settings.pickColor")} defaultValue={b?.primaryColor ?? "#6B1E2E"} className="h-9 w-12 cursor-pointer rounded-md border" name="primaryColor" />
               </div>
             </Field>
-            <Field label="Schrift für Überschriften" htmlFor="fontFamily">
+            <Field label={t("settings.headingFont")} htmlFor="fontFamily">
               <select id="fontFamily" name="fontFamily" defaultValue={b?.fontFamily ?? "serif-classic"} className={selectClass}>
-                {Object.entries(WIDGET_FONTS).map(([key, f]) => (
-                  <option key={key} value={key}>{f.label}</option>
+                {(Object.keys(WIDGET_FONTS) as WidgetFontKey[]).map((key) => (
+                  <option key={key} value={key}>{t(`settings.font.${key}`)}</option>
                 ))}
               </select>
             </Field>
-            <Field label="Modus" htmlFor="themeMode">
+            <Field label={t("settings.themeMode")} htmlFor="themeMode">
               <select id="themeMode" name="themeMode" defaultValue={b?.themeMode ?? "LIGHT"} className={selectClass}>
-                <option value="LIGHT">Hell</option>
-                <option value="DARK">Dunkel</option>
+                <option value="LIGHT">{t("settings.theme.LIGHT")}</option>
+                <option value="DARK">{t("settings.theme.DARK")}</option>
               </select>
             </Field>
-            <Field label="Ecken" htmlFor="cornerStyle">
+            <Field label={t("settings.corners")} htmlFor="cornerStyle">
               <select id="cornerStyle" name="cornerStyle" defaultValue={b?.cornerStyle ?? "soft"} className={selectClass}>
-                <option value="sharp">Kantig</option>
-                <option value="soft">Leicht gerundet</option>
-                <option value="round">Rund</option>
+                <option value="sharp">{t("settings.corner.sharp")}</option>
+                <option value="soft">{t("settings.corner.soft")}</option>
+                <option value="round">{t("settings.corner.round")}</option>
               </select>
             </Field>
-            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-4">Vorschau unter „Website-Einbindung“.</p>
+            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-4">{t("settings.previewHint")}</p>
             <div className="sm:col-span-2 lg:col-span-4">
-              <SubmitButton>Erscheinungsbild speichern</SubmitButton>
+              <SubmitButton>{t("settings.saveBranding")}</SubmitButton>
             </div>
           </ActionForm>
         </Section>
 
-        <Section title="Datenschutzhinweis im Widget" description="Leer lassen, um den Standardtext zu verwenden. Jede Änderung erzeugt eine neue Version, die bei Buchungen mitgespeichert wird.">
+        <Section title={t("settings.privacy")} description={t("settings.privacyDesc")}>
           <ActionForm action={savePrivacyAction.bind(null, slug)} className="space-y-4">
-            <Field label="Text (Deutsch)" htmlFor="privacyNoticeDe">
-              <Textarea id="privacyNoticeDe" name="privacyNoticeDe" rows={5} defaultValue={s.privacyNoticeDe ?? ""} placeholder={defaultPrivacy} />
+            <Field label={t("settings.privacyDe")} htmlFor="privacyNoticeDe">
+              <Textarea id="privacyNoticeDe" name="privacyNoticeDe" rows={5} defaultValue={s.privacyNoticeDe ?? ""} placeholder={defaultPrivacyDe} />
             </Field>
-            <Field label="Text (Englisch)" htmlFor="privacyNoticeEn">
-              <Textarea id="privacyNoticeEn" name="privacyNoticeEn" rows={4} defaultValue={s.privacyNoticeEn ?? ""} />
+            <Field label={t("settings.privacyEn")} htmlFor="privacyNoticeEn">
+              <Textarea id="privacyNoticeEn" name="privacyNoticeEn" rows={4} defaultValue={s.privacyNoticeEn ?? ""} placeholder={defaultPrivacyEn} />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
-              <Field label="Link zur vollständigen Datenschutzerklärung" htmlFor="privacyPolicyUrl" error="privacyPolicyUrl">
+              <Field label={t("settings.policyUrl")} htmlFor="privacyPolicyUrl" error="privacyPolicyUrl">
                 <Input id="privacyPolicyUrl" name="privacyPolicyUrl" type="url" placeholder="https://…" defaultValue={s.privacyPolicyUrl ?? ""} />
               </Field>
-              <Field label="Gastdaten anonymisieren nach (Tagen)" htmlFor="anonymizeAfterDays" hint="Höchstens 180 Tage nach dem Reservierungsdatum." error="anonymizeAfterDays">
+              <Field label={t("settings.anonymize")} htmlFor="anonymizeAfterDays" hint={t("settings.anonymizeHint")} error="anonymizeAfterDays">
                 <Input id="anonymizeAfterDays" name="anonymizeAfterDays" type="number" min={30} max={180} defaultValue={s.anonymizeAfterDays} />
               </Field>
             </div>
-            <p className="text-xs text-muted-foreground">Aktuelle Version: {s.privacyNoticeVersion}</p>
-            <SubmitButton>Datenschutz speichern</SubmitButton>
+            <p className="text-xs text-muted-foreground">{t("settings.privacyVersion", { version: s.privacyNoticeVersion })}</p>
+            <SubmitButton>{t("settings.savePrivacy")}</SubmitButton>
           </ActionForm>
         </Section>
 
-        <Section title="Restaurant & Kontakt" description="Erscheint in E-Mails und Kalendereinträgen. Benachrichtigungen gehen an die E-Mail-Adresse.">
+        <Section title={t("settings.contact")} description={t("settings.contactDesc")}>
           <ActionForm action={saveContactAction.bind(null, slug)} className="grid gap-4 sm:grid-cols-2">
-            <Field label="Name" htmlFor="c-name"><Input id="c-name" name="name" defaultValue={full.name} required /></Field>
-            <Field label="E-Mail für Benachrichtigungen" htmlFor="c-email" error="email"><Input id="c-email" name="email" type="email" defaultValue={full.email} required /></Field>
-            <Field label="Telefon" htmlFor="c-phone"><Input id="c-phone" name="phone" defaultValue={full.phone ?? ""} /></Field>
-            <Field label="Website" htmlFor="c-web" error="websiteUrl"><Input id="c-web" name="websiteUrl" type="url" defaultValue={full.websiteUrl ?? ""} /></Field>
-            <Field label="Straße" htmlFor="c-street"><Input id="c-street" name="street" defaultValue={full.street ?? ""} /></Field>
+            <Field label={t("settings.c.name")} htmlFor="c-name"><Input id="c-name" name="name" defaultValue={full.name} required /></Field>
+            <Field label={t("settings.c.email")} htmlFor="c-email" error="email"><Input id="c-email" name="email" type="email" defaultValue={full.email} required /></Field>
+            <Field label={t("settings.c.phone")} htmlFor="c-phone"><Input id="c-phone" name="phone" defaultValue={full.phone ?? ""} /></Field>
+            <Field label={t("settings.c.website")} htmlFor="c-web" error="websiteUrl"><Input id="c-web" name="websiteUrl" type="url" defaultValue={full.websiteUrl ?? ""} /></Field>
+            <Field label={t("settings.c.street")} htmlFor="c-street"><Input id="c-street" name="street" defaultValue={full.street ?? ""} /></Field>
             <div className="grid grid-cols-[7rem_1fr] gap-3">
-              <Field label="PLZ" htmlFor="c-zip"><Input id="c-zip" name="postalCode" defaultValue={full.postalCode ?? ""} /></Field>
-              <Field label="Ort" htmlFor="c-city"><Input id="c-city" name="city" defaultValue={full.city ?? ""} /></Field>
+              <Field label={t("settings.c.zip")} htmlFor="c-zip"><Input id="c-zip" name="postalCode" defaultValue={full.postalCode ?? ""} /></Field>
+              <Field label={t("settings.c.city")} htmlFor="c-city"><Input id="c-city" name="city" defaultValue={full.city ?? ""} /></Field>
             </div>
-            <div className="sm:col-span-2"><SubmitButton>Kontaktdaten speichern</SubmitButton></div>
+            <div className="sm:col-span-2"><SubmitButton>{t("settings.saveContact")}</SubmitButton></div>
           </ActionForm>
         </Section>
       </div>

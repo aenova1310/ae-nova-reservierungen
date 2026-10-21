@@ -16,11 +16,13 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { AdminKey } from "@/i18n/admin";
 import { cn } from "@/lib/utils";
+import { useAdminT } from "./i18n-provider";
 
 export interface NavItem {
   href: string;
-  label: string;
+  label: AdminKey;
   icon: keyof typeof ICONS;
   ownerOnly?: boolean;
 }
@@ -41,8 +43,9 @@ const ICONS: Record<string, LucideIcon> = {
 
 export function AdminNav({ base, items, onNavigate }: { base: string; items: NavItem[]; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const { t } = useAdminT();
   return (
-    <nav aria-label="Hauptnavigation" className="flex flex-col gap-0.5">
+    <nav aria-label={t("nav.main")} className="flex flex-col gap-0.5">
       {items.map((item) => {
         const href = `${base}${item.href}`;
         const active = item.href === "" ? pathname === base : pathname.startsWith(href);
@@ -59,7 +62,7 @@ export function AdminNav({ base, items, onNavigate }: { base: string; items: Nav
             )}
           >
             <Icon className="size-4" aria-hidden />
-            {item.label}
+            {t(item.label)}
           </Link>
         );
       })}

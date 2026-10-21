@@ -1,6 +1,7 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import { z } from "zod";
+import { msg } from "@/i18n/admin";
 import { sanitizeArea, sanitizeTable, type PlanArea, type PlanTable } from "@/lib/floorplan";
 import { db, type Tx } from "../db";
 import { UserFacingError } from "../http/admin-action";
@@ -97,7 +98,7 @@ const savePayload = z.object({
     .array(
       z.object({
         id: z.string().min(1).max(64),
-        name: z.string().trim().min(1, "Bereichsname fehlt").max(60),
+        name: z.string().trim().min(1, msg("fp.v.areaNameMissing")).max(60),
         x: coord,
         y: coord,
         width: coord,
@@ -108,7 +109,7 @@ const savePayload = z.object({
           .nullable(),
       }),
     )
-    .min(1, "Mindestens ein Bereich")
+    .min(1, msg("fp.v.minOneArea"))
     .max(50),
   tables: z
     .array(
@@ -139,20 +140,20 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
 
   const names = payload.areas.map((a) => a.name.toLocaleLowerCase("de"));
   const duplicate = payload.areas.find((_, i) => names.indexOf(names[i]) !== i);
-  if (duplicate) throw new FloorplanError(`Der Bereichsname „${duplicate.name}“ ist doppelt vergeben.`);
+  if (duplicate) throw new FloorplanError("fp.err.duplicateArea", { name: duplicate.name });
 
   return db.$transaction(async (tx) => {
     // Gleichzeitiges Speichern desselben Plans serialisieren
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`floorplan:${restaurant.id}`}))`;
     const current = await readPlan(tx, restaurant.id);
     if (current.version !== payload.baseVersion) {
-      throw new FloorplanError("Der Raumplan wurde zwischenzeitlich geändert (z. B. ein Tisch angelegt). Bitte neu laden.");
+      throw new FloorplanError("fp.err.changed");
     }
 
     // Vollständigkeit: genau die vorhandenen Tische und Bereiche, nichts Fremdes
     const existingAreaIds = payload.areas.filter((a) => !a.id.startsWith(NEW_AREA_PREFIX)).map((a) => a.id);
-    if (!sameSet(existingAreaIds, current.areas.map((a) => a.id))) throw new FloorplanError("Unbekannter oder fehlender Bereich.");
-    if (!sameSet(payload.tables.map((t) => t.id), current.tables.map((t) => t.id))) throw new FloorplanError("Unbekannter oder fehlender Tisch.");
+    if (!sameSet(existingAreaIds, current.areas.map((a) => a.id))) throw new FloorplanError("fp.err.areaMismatch");
+    if (!sameSet(payload.tables.map((t) => t.id), current.tables.map((t) => t.id))) throw new FloorplanError("fp.err.tableMismatch");
 
     // Umbenennungen zweistufig: erst Platzhalternamen, sonst scheitern Tausch oder
     // Kette ("A→B, B→C") am eindeutigen Namen je Restaurant
@@ -177,7 +178,7 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
 
     for (const t of payload.tables) {
       const areaId = idMap.get(t.areaId);
-      if (!areaId) throw new FloorplanError("Tisch verweist auf einen unbekannten Bereich.");
+      if (!areaId) throw new FloorplanError("fp.err.unknownArea");
       const geo = sanitizeTable(t);
       await tx.table.update({
         where: { id: t.id, restaurantId: restaurant.id },

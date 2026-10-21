@@ -51,7 +51,7 @@ describe("Bildverarbeitung", () => {
   });
 
   it("akzeptiert nur Panoramen im Seitenverhältnis 2:1 und begrenzt sie auf 4096 px", async () => {
-    await expect(processPanorama(await image(3000, 2000))).rejects.toThrow(/doppelt so breit/);
+    await expect(processPanorama(await image(3000, 2000))).rejects.toThrow(/^media\.err\.panoramaRatio\?width=3000&height=2000$/);
     const pano = await processPanorama(await image(6000, 3000));
     expect(pano.main.width).toBe(4096);
     expect(pano.main.height).toBe(2048);
@@ -61,13 +61,13 @@ describe("Bildverarbeitung", () => {
   it("lehnt SVG, Nicht-Bilder, leere und zu kleine Dateien ab", async () => {
     const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400"><script>alert(1)</script></svg>');
     await expect(processLogo(svg)).rejects.toBeInstanceOf(MediaError);
-    await expect(processTablePhoto(Buffer.from("kein bild"))).rejects.toThrow(/kein lesbares Bild/);
-    await expect(processTablePhoto(Buffer.alloc(0))).rejects.toThrow(/leer/);
-    await expect(processTablePhoto(await image(300, 200))).rejects.toThrow(/zu klein/);
+    await expect(processTablePhoto(Buffer.from("kein bild"))).rejects.toThrow("media.err.unreadable");
+    await expect(processTablePhoto(Buffer.alloc(0))).rejects.toThrow("media.err.empty");
+    await expect(processTablePhoto(await image(300, 200))).rejects.toThrow("media.err.photoTooSmall");
   });
 
   it("lehnt zu große Dateien vor der Verarbeitung ab", async () => {
-    await expect(processLogo(Buffer.alloc(4 * 1024 * 1024, 1))).rejects.toThrow(/zu groß/);
+    await expect(processLogo(Buffer.alloc(4 * 1024 * 1024, 1))).rejects.toThrow("media.err.tooLarge");
   });
 
   it("erzeugt Logos als PNG mit Transparenz, max. 800 × 240", async () => {

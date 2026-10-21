@@ -1,9 +1,18 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { useAdminT } from "@/components/admin/i18n-provider";
+import { dateFormat } from "@/i18n/admin/format";
+import type { Locale } from "@/i18n/messages";
 
-const WEEKDAYS = ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"];
-const WEEKDAYS_LONG = ["Montag", "Dienstag", "Mittwoch", "Donnerstag", "Freitag", "Samstag", "Sonntag"];
+/** Wochentagsnamen Mo–So (kurz ohne Punkt, wie bisher "Mo", "Di" …). */
+function weekdayNames(locale: Locale) {
+  const short = dateFormat(locale, { weekday: "short", timeZone: "UTC" });
+  const long = dateFormat(locale, { weekday: "long", timeZone: "UTC" });
+  // 1. Januar 2024 war ein Montag
+  const days = Array.from({ length: 7 }, (_, i) => new Date(Date.UTC(2024, 0, 1 + i, 12)));
+  return { short: days.map((d) => short.format(d).replace(/\.$/, "")), long: days.map((d) => long.format(d)) };
+}
 /** Sequenzielle Skala: eine Farbe (Tinte), hell → dunkel, 5 Stufen. */
 const STEPS = [0.1, 0.28, 0.46, 0.66, 0.88];
 
@@ -12,8 +21,10 @@ const STEPS = [0.1, 0.28, 0.46, 0.66, 0.88];
  * Werte stehen im Tooltip und in der Tabellenansicht – nicht nur in der Farbe.
  */
 export function Heatmap({ cells, title }: { cells: { weekday: number; hour: number; guests: number; reservations: number }[]; title: string }) {
+  const { t, locale } = useAdminT();
+  const { short: WEEKDAYS, long: WEEKDAYS_LONG } = useMemo(() => weekdayNames(locale), [locale]);
   const [active, setActive] = useState<string | null>(null);
-  if (cells.length === 0) return <p className="text-sm text-muted-foreground">Noch keine Daten im gewählten Zeitraum.</p>;
+  if (cells.length === 0) return <p className="text-sm text-muted-foreground">{t("stats.heat.empty")}</p>;
 
   const hours = cells.map((c) => c.hour);
   const minH = Math.min(...hours);
@@ -46,7 +57,7 @@ export function Heatmap({ cells, title }: { cells: { weekday: number; hour: numb
                     key={h}
                     tabIndex={c ? 0 : -1}
                     role={c ? "img" : undefined}
-                    aria-label={c ? `${WEEKDAYS_LONG[wi]} ${h} Uhr: ${c.guests} Gäste, ${c.reservations} Reservierungen` : undefined}
+                    aria-label={c ? t("stats.heat.cell", { weekday: WEEKDAYS_LONG[wi], hour: h, guests: c.guests, reservations: c.reservations }) : undefined}
                     onMouseEnter={() => c && setActive(id)}
                     onFocus={() => c && setActive(id)}
                     onBlur={() => setActive(null)}
@@ -64,14 +75,22 @@ export function Heatmap({ cells, title }: { cells: { weekday: number; hour: numb
       </div>
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
         <span className="flex items-center gap-1.5" aria-hidden>
-          weniger
+          {t("stats.heat.less")}
           {STEPS.map((s) => (
             <span key={s} className="inline-block size-3 rounded-[2px]" style={{ background: `color-mix(in oklab, var(--primary) ${s * 100}%, var(--card))` }} />
           ))}
-          mehr Gäste
+          {t("stats.heat.more")}
         </span>
         <span role="status" className="tabular min-h-4 text-foreground">
-          {activeCell ? `${WEEKDAYS_LONG[activeCell.weekday - 1]}, ${activeCell.hour}–${activeCell.hour + 1} Uhr: ${activeCell.guests} Gäste in ${activeCell.reservations} Reservierungen` : ""}
+          {activeCell
+            ? t("stats.heat.active", {
+                weekday: WEEKDAYS_LONG[activeCell.weekday - 1],
+                from: activeCell.hour,
+                to: activeCell.hour + 1,
+                guests: activeCell.guests,
+                reservations: activeCell.reservations,
+              })
+            : ""}
         </span>
       </div>
     </figure>

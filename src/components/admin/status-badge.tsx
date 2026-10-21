@@ -1,16 +1,19 @@
 import { Ban, CheckCircle2, CircleDashed, CircleUserRound, Clock3, CreditCard, UserX, XCircle, type LucideIcon } from "lucide-react";
+import { isAdminKey, type AdminT } from "@/i18n/admin";
 import { cn } from "@/lib/utils";
+import { getAdminT } from "@/server/i18n";
 
-export const STATUS_LABEL: Record<string, string> = {
-  PENDING_PAYMENT: "Zahlung offen",
-  REQUESTED: "Angefragt",
-  CONFIRMED: "Bestätigt",
-  ARRIVED: "Eingetroffen",
-  NO_SHOW: "No-Show",
-  CANCELLED: "Storniert",
-  EXPIRED: "Verfallen",
-  DECLINED: "Abgelehnt",
-};
+/** Statusbezeichnung in der Benutzersprache (unbekannter Status bleibt unverändert). */
+export function statusLabel(t: AdminT, status: string): string {
+  const key = `res.status.${status}`;
+  return isAdminKey(key) ? t(key) : status;
+}
+
+/** Herkunft der Reservierung (Online, Telefon, …) in der Benutzersprache. */
+export function sourceLabel(t: AdminT, source: string): string {
+  const key = `res.source.${source}`;
+  return isAdminKey(key) ? t(key) : source;
+}
 
 /** Status nie nur über Farbe – immer mit Symbol und Text (Barrierefreiheit). */
 const STYLE: Record<string, { icon: LucideIcon; className: string }> = {
@@ -24,23 +27,17 @@ const STYLE: Record<string, { icon: LucideIcon; className: string }> = {
   DECLINED: { icon: Ban, className: "border-border bg-muted text-muted-foreground" },
 };
 
-export function StatusBadge({ status, className }: { status: string; className?: string }) {
+export async function StatusBadge({ status, className }: { status: string; className?: string }) {
+  const { t } = await getAdminT();
   const s = STYLE[status] ?? STYLE.CONFIRMED;
   const Icon = s.icon;
   return (
     <span className={cn("inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium whitespace-nowrap", s.className, className)}>
       <Icon className="size-3.5" aria-hidden />
-      {STATUS_LABEL[status] ?? status}
+      {statusLabel(t, status)}
     </span>
   );
 }
-
-export const SOURCE_LABEL: Record<string, string> = {
-  ONLINE: "Online",
-  PHONE: "Telefon",
-  WALK_IN: "Walk-in",
-  ADMIN: "Manuell",
-};
 
 /** Farben für Balken im Tagesplan. */
 export const STATUS_BAR: Record<string, string> = {

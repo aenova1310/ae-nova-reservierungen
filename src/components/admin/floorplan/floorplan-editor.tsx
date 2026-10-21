@@ -4,6 +4,7 @@ import { Grid3x3, Minus, Plus, Redo2, Undo2 } from "lucide-react";
 import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, useTransition, type KeyboardEvent, type PointerEvent } from "react";
 import { toast } from "sonner";
 import { saveFloorplanAction } from "@/app/admin/[restaurant]/raumplan/actions";
+import { useAdminT } from "@/components/admin/i18n-provider";
 import { Button } from "@/components/ui/button";
 import {
   AREA_COLORS,
@@ -20,6 +21,7 @@ import {
   type PlanTable,
 } from "@/lib/floorplan";
 import { historyReducer, initHistory } from "@/lib/history";
+import type { AdminT } from "@/i18n/admin";
 import { cn } from "@/lib/utils";
 import { PlanInspector } from "./plan-inspector";
 import { NEW_AREA_PREFIX, moveArea, reassignArea, updateArea, updateTable, type Plan, type Selection } from "./plan-ops";
@@ -36,12 +38,13 @@ type Drag =
 const ZOOMS = [0.5, 0.75, 1, 1.25, 1.5, 2];
 const ROTATE_STEP = 15;
 
-function describeTable(t: PlanTable, areas: PlanArea[]) {
-  const area = areas.find((a) => a.id === t.areaId)?.name ?? "ohne Bereich";
-  return `Tisch ${t.name}, ${t.maxCapacity} Plätze, ${area}, Position ${Math.round(t.x)} / ${Math.round(t.y)}, Drehung ${t.rotation}°`;
+function describeTable(tr: AdminT, t: PlanTable, areas: PlanArea[]) {
+  const area = areas.find((a) => a.id === t.areaId)?.name ?? tr("fp.noArea");
+  return tr("fp.describeTable", { name: t.name, seats: t.maxCapacity, area, x: Math.round(t.x), y: Math.round(t.y), rotation: t.rotation });
 }
 
 export function FloorplanEditor({ slug, initial, version: initialVersion }: { slug: string; initial: Plan; version: string }) {
+  const { t } = useAdminT();
   const [history, dispatch] = useReducer(historyReducer<Plan>, initial, initHistory);
   const plan = history.present;
   const [saved, setSaved] = useState<Plan>(initial);
@@ -109,7 +112,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
     const onClick = (e: MouseEvent) => {
       const link = (e.target as HTMLElement).closest("a[href]");
       if (!link || e.defaultPrevented || e.metaKey || e.ctrlKey || link.getAttribute("target") === "_blank") return;
-      if (!window.confirm("Der Raumplan hat ungespeicherte Änderungen. Seite trotzdem verlassen?")) {
+      if (!window.confirm(t("fp.confirmLeave"))) {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -120,7 +123,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
       window.removeEventListener("beforeunload", onBeforeUnload);
       document.removeEventListener("click", onClick, true);
     };
-  }, [dirty]);
+  }, [dirty, t]);
 
   // ─── Zeigerbedienung ─────────────────────────────────────────────────────
 
@@ -206,21 +209,21 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
 
   const ARROWS: Record<string, Point> = { ArrowLeft: { x: -1, y: 0 }, ArrowRight: { x: 1, y: 0 }, ArrowUp: { x: 0, y: -1 }, ArrowDown: { x: 0, y: 1 } };
 
-  const onTableKey = (e: KeyboardEvent, t: PlanTable) => {
+  const onTableKey = (e: KeyboardEvent, table: PlanTable) => {
     const step = e.shiftKey ? 1 : GRID;
     const dir = ARROWS[e.key];
     if (dir) {
       e.preventDefault();
-      commit((p) => reassignArea(updateTable(p, t.id, (x) => ({ ...x, x: x.x + dir.x * step, y: x.y + dir.y * step })), t.id));
-      setAnnounce(`${t.name}: Position ${Math.round(t.x + dir.x * step)} / ${Math.round(t.y + dir.y * step)}`);
+      commit((p) => reassignArea(updateTable(p, table.id, (x) => ({ ...x, x: x.x + dir.x * step, y: x.y + dir.y * step })), table.id));
+      setAnnounce(t("fp.announcePosition", { name: table.name, x: Math.round(table.x + dir.x * step), y: Math.round(table.y + dir.y * step) }));
     } else if (e.key === "r" || e.key === "R") {
       e.preventDefault();
-      const rotation = normalizeRotation(t.rotation + (e.shiftKey ? -ROTATE_STEP : ROTATE_STEP));
-      commit((p) => updateTable(p, t.id, (x) => ({ ...x, rotation })));
-      setAnnounce(`${t.name}: Drehung ${rotation}°`);
+      const rotation = normalizeRotation(table.rotation + (e.shiftKey ? -ROTATE_STEP : ROTATE_STEP));
+      commit((p) => updateTable(p, table.id, (x) => ({ ...x, rotation })));
+      setAnnounce(t("fp.announceRotation", { name: table.name, rotation }));
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
-      setSelection({ kind: "table", id: t.id });
+      setSelection({ kind: "table", id: table.id });
     } else if (e.key === "Escape") {
       setSelection(null);
     }
@@ -234,7 +237,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
       const x = Math.max(0, a.x + dir.x * step);
       const y = Math.max(0, a.y + dir.y * step);
       commit((p) => moveArea(p, a.id, x, y));
-      setAnnounce(`${a.name}: Position ${x} / ${y}`);
+      setAnnounce(t("fp.announcePosition", { name: a.name, x, y }));
     } else if (e.key === "Enter" || e.key === " ") {
       e.preventDefault();
       setSelection({ kind: "area", id: a.id });
@@ -247,12 +250,12 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
 
   const addArea = () => {
     let n = plan.areas.length + 1;
-    while (plan.areas.some((a) => a.name === `Bereich ${n}`)) n++;
+    while (plan.areas.some((a) => a.name === t("fp.newAreaName", { n }))) n++;
     const id = `${NEW_AREA_PREFIX}${crypto.randomUUID()}`;
     const right = plan.areas.reduce((m, a) => Math.max(m, a.x + a.width), 0);
     const area: PlanArea = sanitizeArea({
       id,
-      name: `Bereich ${n}`,
+      name: t("fp.newAreaName", { n }),
       x: snap(right + 40),
       y: 40,
       width: 400,
@@ -279,7 +282,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
         setSaved(next);
         setVersion(result.plan.version);
         setSelection((s) => (s?.kind === "area" && s.id.startsWith(NEW_AREA_PREFIX) ? null : s));
-        toast.success(result.message ?? "Gespeichert.");
+        toast.success(result.message ?? t("common.saved"));
       } else if (result && !result.ok) {
         toast.error(result.error);
       }
@@ -287,7 +290,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
   };
 
   const discard = () => {
-    if (!window.confirm("Alle ungespeicherten Änderungen verwerfen?")) return;
+    if (!window.confirm(t("fp.confirmDiscard"))) return;
     dispatch({ type: "reset", present: saved });
     setSelection(null);
   };
@@ -296,52 +299,53 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
   const zoomIn = ZOOMS.find((z) => z > scale + 0.001);
   const selectedTable = selection?.kind === "table" ? plan.tables.find((t) => t.id === selection.id) : undefined;
   const selectedArea = selection?.kind === "area" ? plan.areas.find((a) => a.id === selection.id) : undefined;
+  const describe = (table: PlanTable) => describeTable(t, table, plan.areas);
 
   return (
     <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
       <div className="min-w-0 flex-1 rounded-lg border bg-card">
-        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2" role="toolbar" aria-label="Raumplan bearbeiten">
-          <Button type="button" variant="ghost" size="icon" onClick={undo} disabled={history.past.length === 0 || saving} aria-label="Rückgängig (Strg+Z)" title="Rückgängig (Strg+Z)">
+        <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2" role="toolbar" aria-label={t("fp.toolbar")}>
+          <Button type="button" variant="ghost" size="icon" onClick={undo} disabled={history.past.length === 0 || saving} aria-label={t("fp.undo")} title={t("fp.undo")}>
             <Undo2 />
           </Button>
-          <Button type="button" variant="ghost" size="icon" onClick={redo} disabled={history.future.length === 0 || saving} aria-label="Wiederholen (Strg+Umschalt+Z)" title="Wiederholen (Strg+Umschalt+Z)">
+          <Button type="button" variant="ghost" size="icon" onClick={redo} disabled={history.future.length === 0 || saving} aria-label={t("fp.redo")} title={t("fp.redo")}>
             <Redo2 />
           </Button>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
-          <Button type="button" variant="ghost" size="icon" onClick={() => zoomOut && setZoom(zoomOut)} disabled={!zoomOut} aria-label="Verkleinern">
+          <Button type="button" variant="ghost" size="icon" onClick={() => zoomOut && setZoom(zoomOut)} disabled={!zoomOut} aria-label={t("fp.zoomOut")}>
             <Minus />
           </Button>
           <button
             type="button"
             className="w-12 text-center text-sm tabular-nums text-muted-foreground hover:text-foreground"
             onClick={() => setZoom(zoom === "fit" ? 1 : "fit")}
-            aria-label={`Zoom ${Math.round(scale * 100)} %, ${zoom === "fit" ? "auf 100 % stellen" : "an Breite anpassen"}`}
-            title={zoom === "fit" ? "Auf 100 % stellen" : "An Breite anpassen"}
+            aria-label={t("fp.zoomLabel", { percent: Math.round(scale * 100), action: t(zoom === "fit" ? "fp.zoomTo100" : "fp.zoomFit") })}
+            title={t(zoom === "fit" ? "fp.zoomTo100Title" : "fp.zoomFitTitle")}
           >
             {Math.round(scale * 100)} %
           </button>
-          <Button type="button" variant="ghost" size="icon" onClick={() => zoomIn && setZoom(zoomIn)} disabled={!zoomIn} aria-label="Vergrößern">
+          <Button type="button" variant="ghost" size="icon" onClick={() => zoomIn && setZoom(zoomIn)} disabled={!zoomIn} aria-label={t("fp.zoomIn")}>
             <Plus />
           </Button>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
           <Button type="button" variant={snapOn ? "secondary" : "ghost"} size="sm" onClick={() => setSnapOn((v) => !v)} aria-pressed={snapOn}>
-            <Grid3x3 /> Raster
+            <Grid3x3 /> {t("fp.grid")}
           </Button>
           <Button type="button" variant="outline" size="sm" onClick={addArea} disabled={saving}>
-            <Plus /> Bereich
+            <Plus /> {t("fp.addArea")}
           </Button>
           <div className="ml-auto flex items-center gap-2">
             {dirty ? (
               <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                 <span className="size-2 rounded-full bg-messing" aria-hidden />
-                Ungespeichert
+                {t("fp.unsaved")}
               </span>
             ) : null}
             <Button type="button" variant="ghost" size="sm" onClick={discard} disabled={!dirty || saving}>
-              Verwerfen
+              {t("fp.discard")}
             </Button>
             <Button type="button" size="sm" onClick={save} disabled={!dirty || saving} aria-busy={saving}>
-              {saving ? "Speichert …" : "Speichern"}
+              {saving ? t("fp.saving") : t("common.save")}
             </Button>
           </div>
         </div>
@@ -354,7 +358,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
             height={canvas.height * scale}
             viewBox={`0 0 ${canvas.width} ${canvas.height}`}
             role="group"
-            aria-label={`Raumplan mit ${plan.areas.length} Bereichen und ${placed.length} Tischen`}
+            aria-label={t("fp.canvasLabel", { areas: plan.areas.length, tables: placed.length })}
             aria-describedby={helpId}
             className="block font-sans"
             onPointerMove={onPointerMove}
@@ -377,7 +381,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
                   id={`plan-area-${a.id}`}
                   role="button"
                   tabIndex={0}
-                  aria-label={`Bereich ${a.name}, Position ${a.x} / ${a.y}, ${a.width} × ${a.height}`}
+                  aria-label={t("fp.describeArea", { name: a.name, x: a.x, y: a.y, width: a.width, height: a.height })}
                   aria-pressed={selected}
                   aria-describedby={helpId}
                   className="cursor-move outline-none [&:focus-visible>rect:first-child]:stroke-[var(--nova-bordeaux)] [&:focus-visible>rect:first-child]:[stroke-width:3]"
@@ -397,7 +401,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
                   key={t.id}
                   role="button"
                   tabIndex={0}
-                  aria-label={describeTable(t, plan.areas)}
+                  aria-label={describe(t)}
                   aria-pressed={selected}
                   aria-describedby={helpId}
                   className="cursor-grab outline-none active:cursor-grabbing [&:focus-visible_.focus-ring]:visible"
@@ -434,7 +438,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
                   style={{ touchAction: "none" }}
                   onPointerDown={(e) => startDrag(e, { kind: "rotate-table", id: selectedTable.id, from: plan }, selection)}
                 >
-                  <title>Drehen (Taste R)</title>
+                  <title>{t("fp.rotateHandle")}</title>
                 </circle>
                 <rect
                   x={selectedTable.width - 6}
@@ -446,7 +450,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
                   style={{ touchAction: "none" }}
                   onPointerDown={(e) => startDrag(e, { kind: "resize-table", id: selectedTable.id, from: plan }, selection)}
                 >
-                  <title>Größe ändern</title>
+                  <title>{t("fp.resizeHandle")}</title>
                 </rect>
               </g>
             ) : null}
@@ -461,14 +465,13 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
                 style={{ touchAction: "none" }}
                 onPointerDown={(e) => startDrag(e, { kind: "resize-area", id: selectedArea.id, from: plan }, selection)}
               >
-                <title>Bereichsgröße ändern</title>
+                <title>{t("fp.resizeArea")}</title>
               </rect>
             ) : null}
           </svg>
         </div>
         <p id={helpId} className="border-t px-3 py-2 text-xs text-muted-foreground">
-          Ziehen zum Verschieben · runder Griff dreht, eckiger Griff ändert die Größe · Alt beim Ziehen: ohne Raster. Tastatur: Tab wählt
-          Tisch oder Bereich, Pfeiltasten verschieben (mit Umschalt: fein), R dreht um {ROTATE_STEP}°.
+          {t("fp.help", { step: ROTATE_STEP })}
         </p>
         <p aria-live="polite" className="sr-only">
           {announce}

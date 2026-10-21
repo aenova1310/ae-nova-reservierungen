@@ -3,15 +3,17 @@
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import type { AdminKey } from "@/i18n/admin";
 import type { ActionResult } from "@/lib/action-result";
+import { useAdminT } from "./i18n-provider";
 
-const LABELS: Record<string, string> = {
-  CONFIRMED: "Bestätigen",
-  DECLINED: "Ablehnen",
-  ARRIVED: "Eingetroffen",
-  NO_SHOW: "No-Show",
+const LABELS: Record<string, AdminKey> = {
+  CONFIRMED: "res.action.CONFIRMED",
+  DECLINED: "res.action.DECLINED",
+  ARRIVED: "res.action.ARRIVED",
+  NO_SHOW: "res.action.NO_SHOW",
 };
-const UNDO_LABELS: Record<string, string> = { CONFIRMED: "Zurück auf bestätigt" };
+const UNDO_LABELS: Record<string, AdminKey> = { CONFIRMED: "res.action.undoConfirmed" };
 
 /** Schnellaktionen für Statuswechsel (Liste, Heute, Detail). */
 export function StatusActions({
@@ -25,6 +27,7 @@ export function StatusActions({
   onChange: (to: string) => Promise<ActionResult>;
   size?: "sm" | "default";
 }) {
+  const { t } = useAdminT();
   const [pending, start] = useTransition();
   if (allowed.length === 0) return null;
   return (
@@ -38,12 +41,12 @@ export function StatusActions({
           onClick={() =>
             start(async () => {
               const result = await onChange(to);
-              if (result?.ok) toast.success(result.message ?? "Gespeichert.");
+              if (result?.ok) toast.success(result.message ?? t("common.saved"));
               else if (result) toast.error(result.error);
             })
           }
         >
-          {(current !== "REQUESTED" && UNDO_LABELS[to]) || LABELS[to] || to}
+          {(current !== "REQUESTED" && UNDO_LABELS[to] && t(UNDO_LABELS[to])) || (LABELS[to] && t(LABELS[to])) || to}
         </Button>
       ))}
     </div>

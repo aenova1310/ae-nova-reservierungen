@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { msg } from "@/i18n/admin";
 import type { ActionResult } from "@/lib/action-result";
 import { contrastRatio, isHexColor } from "@/lib/color";
 import { WIDGET_FONTS } from "@/lib/fonts";
@@ -15,7 +16,7 @@ const refresh = (slug: string) => {
   revalidatePath(`/r/${slug}`);
   revalidatePath(`/embed/${slug}`);
 };
-const int = (min: number, max: number) => z.coerce.number().int().min(min, `Mindestens ${min}`).max(max, `Höchstens ${max}`);
+const int = (min: number, max: number) => z.coerce.number().int().min(min, msg("common.v.min", { min })).max(max, msg("common.v.max", { max }));
 
 const rulesSchema = z
   .object({
@@ -29,15 +30,15 @@ const rulesSchema = z
     maxAdvanceDays: int(1, 365),
     onlineQuotaPercent: int(0, 100),
   })
-  .refine((d) => d.maxPartySizeOnline >= d.minPartySize, { message: "Muss ≥ Mindestgröße sein", path: ["maxPartySizeOnline"] });
+  .refine((d) => d.maxPartySizeOnline >= d.minPartySize, { message: msg("settings.v.maxPartyGteMin"), path: ["maxPartySizeOnline"] });
 
 export async function saveBookingRulesAction(slug: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { tdb, restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
     const data = rulesSchema.parse(formObject(formData));
     await tdb.restaurantSettings.update({ where: { restaurantId: restaurant.id }, data });
     refresh(slug);
-    return "Buchungsregeln gespeichert.";
+    return t("settings.msg.rulesSaved");
   });
 }
 
@@ -46,7 +47,7 @@ const reminderSchema = z.object({
 });
 
 export async function saveReminderAction(slug: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { tdb, restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
     const { reminder } = reminderSchema.parse(formObject(formData));
     await tdb.restaurantSettings.update({
@@ -55,19 +56,19 @@ export async function saveReminderAction(slug: string, _prev: ActionResult, form
       data: reminder === "off" ? { reminderEnabled: false } : { reminderEnabled: true, reminderHoursBefore: Number(reminder) },
     });
     refresh(slug);
-    return reminder === "off" ? "Erinnerungen ausgeschaltet." : `Erinnerung ${reminder} Stunden vor dem Besuch.`;
+    return reminder === "off" ? t("settings.msg.reminderOff") : t("settings.msg.reminderOn", { hours: reminder });
   });
 }
 
 const brandingSchema = z.object({
-  primaryColor: z.string().refine(isHexColor, "Farbe im Format #RRGGBB"),
+  primaryColor: z.string().refine(isHexColor, msg("settings.v.color")),
   fontFamily: z.enum(Object.keys(WIDGET_FONTS) as [string, ...string[]]),
   themeMode: z.enum(["LIGHT", "DARK"]),
   cornerStyle: z.enum(["sharp", "soft", "round"]),
 });
 
 export async function saveBrandingAction(slug: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { tdb, restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
     const data = brandingSchema.parse(formObject(formData));
     data.primaryColor = data.primaryColor.toUpperCase();
@@ -80,20 +81,20 @@ export async function saveBrandingAction(slug: string, _prev: ActionResult, form
     // Buttons brauchen mind. 3:1 Kontrast zum hellen Hintergrund (WCAG 1.4.11)
     const ratio = contrastRatio(data.primaryColor, "#F6F7F5");
     return ratio < 3
-      ? `Gespeichert. Hinweis: Die Farbe ist sehr hell (Kontrast ${ratio.toFixed(1)}:1) – Buttons sind schlecht erkennbar. Empfohlen ist eine dunklere Variante.`
-      : "Erscheinungsbild gespeichert.";
+      ? t("settings.msg.lowContrast", { ratio: ratio.toFixed(1) })
+      : t("settings.msg.brandingSaved");
   });
 }
 
 const privacySchema = z.object({
   privacyNoticeDe: z.string().max(3000).optional(),
   privacyNoticeEn: z.string().max(3000).optional(),
-  privacyPolicyUrl: z.string().url("Bitte vollständige URL (https://…)").optional(),
+  privacyPolicyUrl: z.string().url(msg("common.v.url")).optional(),
   anonymizeAfterDays: int(30, 180),
 });
 
 export async function savePrivacyAction(slug: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { tdb, restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
     const data = privacySchema.parse(formObject(formData));
     const current = await tdb.restaurantSettings.findUniqueOrThrow({ where: { restaurantId: restaurant.id } });
@@ -111,22 +112,22 @@ export async function savePrivacyAction(slug: string, _prev: ActionResult, formD
       },
     });
     refresh(slug);
-    return textChanged ? "Datenschutzhinweis gespeichert (neue Version)." : "Gespeichert.";
+    return textChanged ? t("settings.msg.privacySaved") : t("common.saved");
   });
 }
 
 const contactSchema = z.object({
   name: z.string().min(2).max(80),
-  email: z.string().email("Ungültige E-Mail"),
+  email: z.string().email(msg("settings.v.email")),
   phone: z.string().max(40).optional(),
   street: z.string().max(100).optional(),
   postalCode: z.string().max(10).optional(),
   city: z.string().max(60).optional(),
-  websiteUrl: z.string().url("Bitte vollständige URL (https://…)").optional(),
+  websiteUrl: z.string().url(msg("common.v.url")).optional(),
 });
 
 export async function saveContactAction(slug: string, _prev: ActionResult, formData: FormData) {
-  return runAction(async () => {
+  return runAction(async (t) => {
     const { restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
     const data = contactSchema.parse(formObject(formData));
     // Restaurant selbst ist kein Tenant-Modell; Zugriff ist durch requireRestaurantAccess geprüft
@@ -143,6 +144,6 @@ export async function saveContactAction(slug: string, _prev: ActionResult, formD
       },
     });
     refresh(slug);
-    return "Kontaktdaten gespeichert.";
+    return t("settings.msg.contactSaved");
   });
 }
