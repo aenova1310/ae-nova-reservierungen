@@ -7,6 +7,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { requestPasswordReset } from "@/server/auth/account";
 import { rateLimit } from "@/server/auth/rate-limit";
 import { hashToken } from "@/server/crypto";
+import { clientIp } from "@/server/http/request";
 
 const schema = z.object({ email: z.string().trim().toLowerCase().email("Bitte eine gültige E-Mail-Adresse eingeben.") });
 
@@ -14,7 +15,7 @@ export async function requestResetAction(_prev: ActionResult, formData: FormData
   const parsed = schema.safeParse({ email: formData.get("email") });
   if (!parsed.success) return { ok: false, error: "Bitte Eingabe prüfen.", fieldErrors: { email: parsed.error.issues[0].message } };
 
-  const ip = (await headers()).get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  const ip = clientIp(await headers());
   const perAddress = rateLimit(`reset:${hashToken(parsed.data.email)}`, 3, 60 * 60_000);
   const perIp = rateLimit(`reset-ip:${hashToken(ip)}`, 10, 60 * 60_000);
   if (!perIp.ok) return { ok: false, error: "Zu viele Anfragen. Bitte später erneut versuchen." };

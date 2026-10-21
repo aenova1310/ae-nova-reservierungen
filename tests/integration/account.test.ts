@@ -1,6 +1,6 @@
 import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
-import { acceptInvitation, AccountError, invitationView, inviteMember, requestPasswordReset, resendInvitation, resetPassword, resetTokenEmail, revokeInvitation } from "@/server/auth/account";
+import { acceptInvitation, AccountError, INVITE_LIMITS, invitationView, inviteMember, requestPasswordReset, resendInvitation, resetPassword, resetTokenEmail, revokeInvitation } from "@/server/auth/account";
 import { hashPassword, verifyPassword } from "@/server/auth/password";
 import { retryPendingEmails } from "@/server/email/outbox";
 import { setEmailProvider, type EmailMessage } from "@/server/email/provider";
@@ -138,10 +138,41 @@ describe("Einladungen", () => {
     expect(await invitationView(newToken)).toBeNull();
   });
 
+  it("behält beim Erneuern die alte Einladung, wenn der Versand scheitert", async () => {
+    const { ctx } = await owner("erneuern");
+    await inviteMember(ctx, "erneuern@example.test", "STAFF");
+    const oldToken = tokenFrom(sent[0]);
+    failNext = 1;
+    await expect(inviteMember(ctx, "erneuern@example.test", "STAFF")).rejects.toThrow(/nicht gesendet/);
+    expect(await invitationView(oldToken)).not.toBeNull();
+    expect(await db.invitation.count()).toBe(1);
+  });
+
+  it("prüft beim Annehmen den Tarif erneut und lehnt doppelte Zugänge ab", async () => {
+    const { ctx, restaurant } = await owner("downgrade");
+    await inviteMember(ctx, "spaet@example.test", "STAFF");
+    await db.restaurant.update({ where: { id: restaurant.id }, data: { planCode: "BASIC" } });
+    await expect(acceptInvitation(tokenFrom(sent[0]), { name: "Spät", password: "passwort-neu-1" })).rejects.toThrow(/Tarif/);
+    expect(await db.user.count({ where: { email: "spaet@example.test" } })).toBe(0); // zurückgerollt
+
+    const a = await owner("doppelt-a");
+    const b = await owner("doppelt-b");
+    await inviteMember(b.ctx, a.user.email, "STAFF");
+    const token = tokenFrom(sent.at(-1)!);
+    await db.membership.create({ data: { userId: a.user.id, organizationId: b.org.id, role: "OWNER" } });
+    await expect(acceptInvitation(token, { password: "altes-passwort-1" })).rejects.toThrow(/bereits Zugang/);
+  });
+
+  it("begrenzt Einladungen je Betrieb (kein Mail-Relais)", async () => {
+    const { ctx } = await owner("relais");
+    for (let i = 0; i < INVITE_LIMITS.perOrgPerHour; i++) await inviteMember(ctx, `p${i}@relais.test`, "STAFF");
+    await expect(inviteMember(ctx, "zuviel@relais.test", "STAFF")).rejects.toThrow(/Zu viele Einladungen/);
+  });
+
   it("legt bei Versandfehler keine Einladung an und protokolliert ohne Nachversand", async () => {
     const { ctx } = await owner("fehler");
     failNext = 1;
-    await expect(inviteMember(ctx, "neu@example.test", "STAFF")).rejects.toThrow(/nicht gesendet/);
+    await expect(inviteMember(ctx, "fehler@example.test", "STAFF")).rejects.toThrow(/nicht gesendet/);
     expect(await db.invitation.count()).toBe(0);
     const log = await db.emailLog.findFirstOrThrow({ where: { type: "STAFF_INVITATION" } });
     expect(log).toMatchObject({ status: "FAILED", providerMessageId: "direct" });

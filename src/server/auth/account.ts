@@ -5,7 +5,9 @@ import { env } from "../env";
 import { emailProvider } from "../email/provider";
 import { renderMailHtml, renderMailText, type MailLayoutInput } from "../email/templates";
 import { maxMembers, type PlanCode } from "../plans/features";
+import { Prisma } from "@/generated/prisma/client";
 import { hashPassword, verifyPassword } from "./password";
+import { rateLimit } from "./rate-limit";
 
 /**
  * Konten: "Passwort vergessen" und Einladungen für Mitarbeiter.
@@ -19,6 +21,13 @@ export class AccountError extends Error {}
 
 export const RESET_TTL_MINUTES = 60;
 export const INVITATION_TTL_DAYS = 7;
+
+/**
+ * Grenzen gegen Missbrauch als Mail-Relais (Absender ist unsere Domain, Text
+ * enthält frei wählbare Namen): je Betrieb und je Empfänger, plus Obergrenze
+ * offener Einladungen. Pro hat zwar unbegrenzte Zugänge, aber nicht unbegrenzte Mails.
+ */
+export const INVITE_LIMITS = { perOrgPerHour: 20, perRecipientPerDay: 5, maxOpen: 25 } as const;
 
 type Role = "OWNER" | "STAFF";
 const roleLabel = (role: Role) => (role === "OWNER" ? "Inhaber/in" : "Mitarbeiter/in");
@@ -159,19 +168,28 @@ export async function inviteMember(ctx: InviteContext, rawEmail: string, role: R
     throw new AccountError("Diese Person hat bereits Zugang.");
   }
   await assertSeat(ctx, email);
+  const open = await db.invitation.count({ where: { ...openInvitations(ctx.organizationId), NOT: { email } } });
+  if (open >= INVITE_LIMITS.maxOpen) throw new AccountError(`Es sind bereits ${open} Einladungen offen. Bitte ziehen Sie nicht mehr benötigte zurück.`);
+  if (
+    !rateLimit(`invite-org:${ctx.organizationId}`, INVITE_LIMITS.perOrgPerHour, 3_600_000).ok ||
+    !rateLimit(`invite-to:${hashToken(email)}`, INVITE_LIMITS.perRecipientPerDay, 86_400_000).ok
+  ) {
+    throw new AccountError("Zu viele Einladungen in kurzer Zeit. Bitte später erneut versuchen.");
+  }
+
   const token = randomToken();
-  const created = await db.$transaction(async (tx) => {
-    await tx.invitation.deleteMany({ where: { organizationId: ctx.organizationId, email, acceptedAt: null } });
-    return tx.invitation.create({
-      data: { organizationId: ctx.organizationId, email, role, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 86_400_000) },
-    });
+  const created = await db.invitation.create({
+    data: { organizationId: ctx.organizationId, email, role, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + INVITATION_TTL_DAYS * 86_400_000) },
   });
   try {
     await mailInvitation(ctx, email, role, token);
   } catch (error) {
+    // Nur die neue Einladung verwerfen – eine ältere, noch gültige bleibt bestehen
     await db.invitation.delete({ where: { id: created.id } }).catch(() => undefined);
     throw error;
   }
+  // Erst nach erfolgreichem Versand ersetzen: ältere Links derselben Adresse werden ungültig
+  await db.invitation.deleteMany({ where: { organizationId: ctx.organizationId, email, acceptedAt: null, NOT: { id: created.id } } });
 }
 
 /** Neuer Link für eine offene oder abgelaufene Einladung (alter Link wird ungültig). */
@@ -227,6 +245,11 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
   if (!inv) throw new AccountError("Die Einladung ist ungültig oder abgelaufen. Bitte lassen Sie sich neu einladen.");
   const existing = await db.user.findUnique({ where: { email: inv.email } });
   if (existing) {
+    // Passwortprüfung → wie beim Login begrenzen
+    if (!rateLimit(`invite-accept:${inv.id}`, 8, 15 * 60_000).ok) throw new AccountError("Zu viele Versuche. Bitte später erneut versuchen.");
+    if (await db.membership.findUnique({ where: { userId_organizationId: { userId: existing.id, organizationId: inv.organizationId } } })) {
+      throw new AccountError("Sie haben bereits Zugang zu diesem Betrieb. Bitte melden Sie sich an.");
+    }
     if (existing.disabledAt || !(await verifyPassword(existing.passwordHash, input.password))) {
       throw new AccountError("Das Passwort ist nicht korrekt.");
     }
@@ -235,21 +258,33 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
   }
   const passwordHash = existing ? null : await hashPassword(input.password);
 
-  const userId = await db.$transaction(async (tx) => {
-    const claimed = await tx.invitation.updateMany({
-      where: { id: inv.id, acceptedAt: null, expiresAt: { gt: new Date() } },
-      data: { acceptedAt: new Date() },
+  let userId: string;
+  try {
+    userId = await db.$transaction(async (tx) => {
+      const claimed = await tx.invitation.updateMany({
+        where: { id: inv.id, acceptedAt: null, expiresAt: { gt: new Date() } },
+        data: { acceptedAt: new Date() },
+      });
+      if (claimed.count !== 1) throw new AccountError("Die Einladung wurde bereits angenommen.");
+      // Tarif erneut prüfen (z. B. Wechsel auf Basic nach dem Einladen)
+      const [members, restaurants] = await Promise.all([
+        tx.membership.count({ where: { organizationId: inv.organizationId } }),
+        tx.restaurant.findMany({ where: { organizationId: inv.organizationId }, select: { planCode: true } }),
+      ]);
+      const seats = Math.max(0, ...restaurants.map((r) => maxMembers(r.planCode)));
+      if (members >= seats) throw new AccountError("Der Tarif des Restaurants erlaubt derzeit keine weiteren Zugänge. Bitte wenden Sie sich an das Restaurant.");
+      const user =
+        existing ??
+        (await tx.user.create({ data: { email: inv.email, name: input.name!.trim().slice(0, 80), passwordHash: passwordHash!, emailVerified: new Date() } }));
+      await tx.membership.create({ data: { userId: user.id, organizationId: inv.organizationId, role: inv.role } });
+      return user.id;
     });
-    if (claimed.count !== 1) throw new AccountError("Die Einladung wurde bereits angenommen.");
-    const user =
-      existing ??
-      (await tx.user.create({ data: { email: inv.email, name: input.name!.trim().slice(0, 80), passwordHash: passwordHash!, emailVerified: new Date() } }));
-    await tx.membership.upsert({
-      where: { userId_organizationId: { userId: user.id, organizationId: inv.organizationId } },
-      update: {},
-      create: { userId: user.id, organizationId: inv.organizationId, role: inv.role },
-    });
-    return user.id;
-  });
+  } catch (error) {
+    // Gleichzeitiges Annehmen (gleiche Adresse/zweite Einladung) → verständliche Meldung statt Serverfehler
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+      throw new AccountError("Für diese Adresse wurde gerade schon ein Zugang angelegt. Bitte melden Sie sich an.");
+    }
+    throw error;
+  }
   return { userId, slug: inv.organization.restaurants[0]?.slug ?? null };
 }

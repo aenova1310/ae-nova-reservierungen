@@ -6,9 +6,7 @@ import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
 import { AccountError, acceptInvitation } from "@/server/auth/account";
 import { newPasswordSchema } from "@/server/auth/password";
-import { rateLimit } from "@/server/auth/rate-limit";
 import { createSession, destroySession } from "@/server/auth/session";
-import { hashToken } from "@/server/crypto";
 import { fieldErrors } from "@/server/http/admin-action";
 
 const newAccount = z.object({ name: z.string().trim().min(2, "Bitte Ihren Namen angeben").max(80) }).and(newPasswordSchema);
@@ -19,8 +17,6 @@ export async function acceptInvitationAction(token: string, existing: boolean, _
   if (existing) {
     const password = String(formData.get("password") ?? "");
     if (!password) return { ok: false, error: "Bitte Ihr Passwort eingeben.", fieldErrors: { password: "Pflichtfeld" } };
-    // Passwortprüfung → wie beim Login begrenzen
-    if (!rateLimit(`invite:${hashToken(token)}`, 8, 15 * 60_000).ok) return { ok: false, error: "Zu viele Versuche. Bitte später erneut versuchen." };
     input = { password };
   } else {
     const parsed = newAccount.safeParse({ name: formData.get("name"), password: formData.get("password"), confirm: formData.get("confirm") });

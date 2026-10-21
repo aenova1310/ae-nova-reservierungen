@@ -32,13 +32,17 @@ export const JOBS = {
   "send-reminders": () => sendReminders(),
   /** Täglich: Gastdaten nach Ablauf der Frist anonymisieren. */
   anonymize: () => runAnonymization(),
-  /** Täglich: abgelaufene Sessions, Reset-Links und alte Einladungen löschen. */
+  /** Täglich: abgelaufene Sessions, Reset-Links und alte (auch angenommene) Einladungen löschen. */
   cleanup: async () => {
     const now = new Date();
     const sessions = await db.session.deleteMany({ where: { expiresAt: { lt: now } } });
     const resets = await db.passwordResetToken.deleteMany({ where: { expiresAt: { lt: now } } });
     // Abgelaufene Einladungen 30 Tage lang im Team-Bereich zeigen (erneut senden), dann löschen
-    const invitations = await db.invitation.deleteMany({ where: { acceptedAt: null, expiresAt: { lt: new Date(now.getTime() - 30 * 86_400_000) } } });
+    // Angenommene Einladungen ebenfalls nach 30 Tagen (Datensparsamkeit: enthalten E-Mail-Adressen)
+    const monthAgo = new Date(now.getTime() - 30 * 86_400_000);
+    const invitations = await db.invitation.deleteMany({
+      where: { OR: [{ acceptedAt: null, expiresAt: { lt: monthAgo } }, { acceptedAt: { lt: monthAgo } }] },
+    });
     return { sessions: sessions.count, resets: resets.count, invitations: invitations.count };
   },
 } as const;
