@@ -18,13 +18,13 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | Admin | Heute-Übersicht, Reservierungsliste (Filter, Suche, Status), Detail mit Verlauf, Umbuchen, Storno, Telefon-/Walk-in-Erfassung, Tagesplan pro Tisch, Tische/Bereiche/Kombinationen, Öffnungszeiten/Schichten/Ruhetage/Sonderschließungen, Verweildauer, Puffer, Slot-Raster, Online-Kontingent, Bestätigungsmodus, Branding, Datenschutztext, Team |
 | Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
 | Super-Admin | `/superadmin`: Mandantenübersicht mit Buchungsvolumen und Monatsumsatz, Restaurant inkl. Inhaber-Zugang anlegen, sperren/freischalten, Tarif wechseln, Preise pflegen |
+| Statistik (Pro) | Reservierungen, Gäste, No-Show-Quote, Online-Anteil, Stornierungen pro Woche/Monat mit Vergleich zum Vorzeitraum; Auslastungs-Heatmap Wochentag × Uhrzeit; Tabellenansicht; im Basic-Tarif serverseitig gesperrt |
 | DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
 
 **Noch nicht enthalten (geplant):** Phase 2 – Raumplan-Editor, Tischansicht/360°-Viewer und
 Medien-Upload (die Komponente `TableViewPreview` mit Renderer-Registry ist vorbereitet, zeigt aber
 bis dahin den Platzhalter), Anzahlung mit Stripe Connect (Datenmodell und Status
-`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt), Statistiken,
-Logo-Upload. Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
+`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt), Logo-Upload. Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
 Passwort-Zurücksetzen per Mail.
 
 ## Schnellstart (lokal)
