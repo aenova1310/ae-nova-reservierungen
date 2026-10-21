@@ -1,0 +1,53 @@
+# Lokaler Gesamtbetrieb bzw. Vorlage für Coolify/Hetzner.
+#   docker compose up -d db
+#   docker compose run --rm migrate
+#   docker compose up -d app cron
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nova}
+      POSTGRES_DB: nova
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nova"]
+      interval: 5s
+      retries: 10
+    ports:
+      - "127.0.0.1:5432:5432"
+
+  migrate:
+    build: { context: ., target: migrate }
+    environment:
+      DATABASE_URL: postgresql://nova:${POSTGRES_PASSWORD:-nova}@db:5432/nova
+    depends_on:
+      db: { condition: service_healthy }
+    profiles: ["tools"]
+
+  app:
+    build: { context: ., target: runner }
+    env_file: .env
+    environment:
+      DATABASE_URL: postgresql://nova:${POSTGRES_PASSWORD:-nova}@db:5432/nova
+    ports:
+      - "3000:3000"
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+
+  # Ruft die Cron-Endpunkte auf (siehe README „Hintergrundjobs“)
+  cron:
+    image: curlimages/curl:8.11.1
+    env_file: .env
+    entrypoint: ["/bin/sh", "/jobs/cron.sh"]
+    environment:
+      TARGET: http://app:3000
+    volumes:
+      - ./docker/cron.sh:/jobs/cron.sh:ro
+    depends_on: [app]
+    restart: unless-stopped
+
+volumes:
+  pgdata:

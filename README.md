@@ -1,0 +1,160 @@
+# A&E NOVA Reservierungen
+
+Tischreservierungen als SaaS für inhabergeführte Restaurants: Gäste-Widget zum Einbetten,
+Admin-Bereich für das Team, strikt getrennte Mandanten, Hosting in der EU, ohne Tracking.
+
+Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHITEKTUR.md).
+
+## Stand: Phase 1 (MVP)
+
+| Bereich | Enthalten |
+|---|---|
+| Gäste-Widget | Personen → Datum → freie Uhrzeiten → Bereich/Tisch → Kontakt → Bestätigung als „Platzkarte“; Deutsch/Englisch umschaltbar; mobil zuerst; Tastatur & Screenreader (axe-geprüft) |
+| Zuteilung | Pro Restaurant: **automatisch** (kleinster passender Tisch, dann Kombinationen; Gast wählt höchstens den Bereich) oder **Tischwahl durch den Gast** |
+| Doppelbuchungen | Ausgeschlossen durch Advisory-Lock pro Restaurant **und** PostgreSQL-Exclusion-Constraint (getestet mit 12 parallelen Buchungen) |
+| Ändern/Stornieren | Tokenbasierter Link in der E-Mail, ohne Login, bis zum Reservierungsbeginn; Tisch wird sofort frei; Mail an Gast und Restaurant |
+| E-Mails | Bestätigung, Anfrage, Ablehnung, Änderung, Storno (Gast/Restaurant) mit `.ics` (UID/SEQUENCE/CANCEL); Outbox mit automatischem Nachversand |
+| Einbindung | `<script>` (Button mit Dialog oder inline) und `<iframe>` mit automatischer Höhe; Code-Generator mit Live-Vorschau |
+| Admin | Heute-Übersicht, Reservierungsliste (Filter, Suche, Status), Detail mit Verlauf, Umbuchen, Storno, Telefon-/Walk-in-Erfassung, Tagesplan pro Tisch, Tische/Bereiche/Kombinationen, Öffnungszeiten/Schichten/Ruhetage/Sonderschließungen, Verweildauer, Puffer, Slot-Raster, Online-Kontingent, Bestätigungsmodus, Branding, Datenschutztext, Team |
+| Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
+| DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
+
+**Noch nicht enthalten (geplant):** Phase 2 – Raumplan-Editor, Tischansicht/360°-Viewer und
+Medien-Upload (die Komponente `TableViewPreview` mit Renderer-Registry ist vorbereitet, zeigt aber
+bis dahin den Platzhalter), Anzahlung mit Stripe Connect (Datenmodell und Status
+`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt), Statistiken, Super-Admin-Oberfläche,
+Logo-Upload. Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
+Passwort-Zurücksetzen per Mail.
+
+## Schnellstart (lokal)
+
+Voraussetzungen: Node.js 22, PostgreSQL 16 (lokal oder per `docker compose up -d db`).
+
+```bash
+cp .env.example .env            # Werte anpassen (APP_SECRET, CRON_SECRET)
+npm install                     # erzeugt auch den Prisma-Client
+npm run db:migrate              # Schema + Exclusion-Constraint anlegen
+npm run db:seed                 # Demo-Restaurant „Pastahaus“
+npm run dev                     # http://localhost:3000
+```
+
+| Was | Wo | Zugang |
+|---|---|---|
+| Gäste-Widget | http://localhost:3000/r/pastahaus | – |
+| Admin (Inhaberin) | http://localhost:3000/admin/login | `inhaber@pastahaus.de` / `pastahaus-demo` |
+| Admin (Mitarbeiter) | dito | `service@pastahaus.de` / `pastahaus-demo` |
+| Super-Admin | dito | `admin@ae-nova.de` / `nova-superadmin` (sieht alle Restaurants) |
+| Zweites Restaurant (Basic) | http://localhost:3000/r/bistro-lumen | – |
+
+Ohne `RESEND_API_KEY` werden E-Mails nicht verschickt, sondern als HTML (plus `.ics`) unter
+`.mail-outbox/` abgelegt – inklusive funktionierendem Storno-Link.
+
+## Skripte
+
+| Befehl | Zweck |
+|---|---|
+| `npm run dev` / `build` / `start` | Entwicklung, Produktions-Build (inkl. `embed.js`), Start |
+| `npm test` | Unit-Tests (Verfügbarkeit, Zuteilung, Kontingent, Zeitumstellung, ICS) |
+| `npm run test:integration` | Tests gegen echtes PostgreSQL (`TEST_DATABASE_URL`, eigene leere DB!) |
+| `npm run typecheck` / `lint` | TypeScript (strict) und ESLint inkl. Schichtenregeln |
+| `npm run db:migrate` / `db:deploy` / `db:seed` | Migrationen (Entwicklung/Produktion), Seed |
+| `npm run build:embed` | Nur `public/embed.js` neu bauen |
+
+Testdatenbank anlegen: `createdb nova_test && DATABASE_URL=$TEST_DATABASE_URL npx prisma migrate deploy`.
+
+## Projektstruktur (Kurzfassung)
+
+```
+prisma/            schema.prisma, migrations/ (inkl. Exclusion-Constraint), seed.ts
+embed/embed.ts     Einbettungs-Skript → public/embed.js
+src/app/           Routen: /r/[slug] (Widget), /embed/[slug] (iframe), /r/[slug]/m/[token] (Verwalten),
+                   /admin/…, /api/public/…, /api/cron/[job]
+src/server/        Fachlogik – einziger Ort mit DB-Zugriff
+  availability/    reine Verfügbarkeits- und Zuteilungslogik (+ load.ts für DB)
+  reservations/    Anlegen, Ändern, Stornieren, Status (Transaktionen + Lock)
+  email/           Outbox, Templates, ICS, Provider (Resend/Datei)
+  tenancy/         Tenant-Scoped Prisma Client, Zugriffsprüfung
+  privacy/         Anonymisierung, Export, Löschung
+src/components/    widget/, admin/, table-view/, ui/ (shadcn)
+tests/             unit/, integration/
+```
+
+## Widget einbinden
+
+Im Admin unter **Website-Einbindung** gibt es den Code mit Live-Vorschau. Kurzform:
+
+```html
+<!-- Button, öffnet das Widget in einem Dialog -->
+<script src="https://app.example.de/embed.js" data-restaurant="pastahaus" async></script>
+
+<!-- Direkt eingebettet -->
+<script src="https://app.example.de/embed.js" data-restaurant="pastahaus" data-mode="inline" async></script>
+```
+
+Optionale Attribute: `data-lang="en"`, `data-label="…"`, `data-color="#6B1E2E"`, `data-target="#id"`.
+Nur `/embed/*` darf von fremden Seiten eingerahmt werden (`frame-ancestors *`), alle anderen Routen
+senden `frame-ancestors 'none'` und `X-Frame-Options: DENY`.
+
+## Hintergrundjobs
+
+Alle Jobs sind HTTP-Endpunkte, abgesichert mit `Authorization: Bearer $CRON_SECRET`:
+
+| Job | Takt | Aufgabe |
+|---|---|---|
+| `POST /api/cron/expire-holds` | jede Minute | unbezahlte Holds (Anzahlung, Phase 2) verfallen lassen |
+| `POST /api/cron/send-emails` | alle 5 Minuten | wartende/fehlgeschlagene Mails nachsenden |
+| `POST /api/cron/anonymize` | täglich | Gastdaten nach Ablauf der Frist anonymisieren |
+| `POST /api/cron/cleanup` | täglich | abgelaufene Sessions löschen |
+
+Im Docker-Compose-Setup übernimmt der Dienst `cron` (`docker/cron.sh`) die Aufrufe.
+
+## Deployment (EU)
+
+Die App ist als Next.js-`standalone`-Build portabel. Empfohlen (siehe Architektur 3.13):
+
+### Option A – Hetzner Cloud + Coolify (rein europäisch)
+
+1. Server in Falkenstein/Nürnberg anlegen (z. B. CX22), Coolify installieren.
+2. PostgreSQL 16 als Coolify-Ressource anlegen; tägliches Backup in Hetzner Object Storage aktivieren.
+3. Neue Anwendung aus dem Git-Repository, Build-Pack **Dockerfile** (Target `runner`), Port 3000.
+4. Umgebungsvariablen aus `.env.example` setzen (`APP_URL` = öffentliche Domain, starke Secrets).
+5. Migrationen bei jedem Deploy: Pre-Deploy-Kommando `npx prisma migrate deploy` (Image-Target
+   `migrate`) oder einmalig `docker compose run --rm migrate`.
+6. Scheduled Tasks in Coolify für die vier Cron-Endpunkte anlegen (oder den `cron`-Dienst nutzen).
+7. Resend: Absenderdomain mit **Region eu-west-1** anlegen, SPF/DKIM setzen, `RESEND_API_KEY` eintragen.
+
+Mit Docker Compose auf einem eigenen Server:
+
+```bash
+cp .env.example .env   # Werte setzen, POSTGRES_PASSWORD exportieren
+docker compose up -d db
+docker compose run --rm migrate
+docker compose up -d app cron
+```
+
+Davor einen Reverse-Proxy mit TLS (Caddy/Traefik) setzen.
+
+### Option B – Vercel (Region `fra1`) + Neon (Frankfurt)
+
+Repository importieren, Region `fra1`, `DATABASE_URL` von Neon (eu-central-1), Build-Befehl
+`npx prisma migrate deploy && npm run build`. Cron-Endpunkte über Vercel Cron (GET wird unterstützt)
+mit `CRON_SECRET` aufrufen. Hinweis: US-Anbieter mit EU-Region – im AVV als Unterauftragsverarbeiter
+mit DPF/SCC aufführen.
+
+### Vor dem Livegang
+
+- [ ] `APP_SECRET`, `CRON_SECRET`, DB-Passwort stark und geheim; Seed-Passwörter ändern oder Seed nicht ausführen
+- [ ] `APP_URL` auf HTTPS-Domain, Resend-Domain verifiziert
+- [ ] Backups der Datenbank getestet (Wiederherstellung!)
+- [ ] Cron-Jobs laufen (Antworten prüfen)
+- [ ] AVV, TOMs, Unterauftragsverarbeiter-Liste, Impressum/AGB bereit (siehe Architektur, Abschnitt 6)
+- [ ] Rate-Limit ist In-Memory → bei mehreren App-Instanzen auf DB/Redis umstellen
+
+## Sicherheit in Kürze
+
+- Mandantentrennung über `tenantDb(restaurantId)` (Prisma-Extension erzwingt `restaurantId`) plus
+  Zugriffsprüfung `requireRestaurantAccess` in jeder Admin-Seite/-Action; Integrationstest vorhanden.
+- Passwörter mit argon2id, Sessions serverseitig (nur Token-Hash in der DB), Login-Rate-Limit,
+  konstante Laufzeit bei unbekannten E-Mails.
+- Verwaltungslinks: HMAC-Token (256 Bit), in der DB nur der Hash; `APP_SECRET` rotieren macht alle Links ungültig.
+- Öffentliche Buchungs-API: Zod-Validierung, Honeypot, Rate-Limit pro (gehashter) IP, keine IP-Speicherung.

@@ -1,0 +1,175 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-instrument), ui-sans-serif, system-ui, sans-serif;
+  --font-serif: var(--font-spectral), ui-serif, Georgia, serif;
+  --font-display: var(--font-widget-display, var(--font-spectral)), ui-serif, Georgia, serif;
+  --font-heading: var(--font-sans);
+  --color-messing: var(--nova-messing);
+  --color-salbei: var(--nova-salbei);
+  --color-bordeaux: var(--nova-bordeaux);
+  --color-schiefer: var(--nova-schiefer);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  /* A&E NOVA Design-Tokens (siehe docs/ARCHITEKTUR.md, Abschnitt 7) */
+  --nova-porzellan: #f6f7f5;
+  --nova-tinte: #1d2433;
+  --nova-schiefer: #5b6472;
+  --nova-linie: #dcdfe3;
+  --nova-bordeaux: #6b1e2e;
+  --nova-messing: #9c7a3c;
+  --nova-salbei: #3f6b4f;
+
+  --background: var(--nova-porzellan);
+  --foreground: var(--nova-tinte);
+  --card: #ffffff;
+  --card-foreground: var(--nova-tinte);
+  --popover: #ffffff;
+  --popover-foreground: var(--nova-tinte);
+  --primary: var(--nova-tinte);
+  --primary-foreground: #ffffff;
+  --secondary: #eceeec;
+  --secondary-foreground: var(--nova-tinte);
+  --muted: #eceeec;
+  --muted-foreground: var(--nova-schiefer);
+  --accent: #eceeec;
+  --accent-foreground: var(--nova-tinte);
+  --destructive: #a1283b;
+  --border: var(--nova-linie);
+  --input: #c9cdd3;
+  --ring: #3b4a66;
+  --chart-1: #1d2433;
+  --chart-2: #6b1e2e;
+  --chart-3: #9c7a3c;
+  --chart-4: #3f6b4f;
+  --chart-5: #5b6472;
+  --radius: 0.375rem;
+  --sidebar: #ffffff;
+  --sidebar-foreground: var(--nova-tinte);
+  --sidebar-primary: var(--nova-tinte);
+  --sidebar-primary-foreground: #ffffff;
+  --sidebar-accent: #eceeec;
+  --sidebar-accent-foreground: var(--nova-tinte);
+  --sidebar-border: var(--nova-linie);
+  --sidebar-ring: #3b4a66;
+}
+
+.dark {
+  --background: #14181f;
+  --foreground: #e9ebee;
+  --card: #1b2029;
+  --card-foreground: #e9ebee;
+  --popover: #1b2029;
+  --popover-foreground: #e9ebee;
+  --primary: #e9ebee;
+  --primary-foreground: #14181f;
+  --secondary: #252b36;
+  --secondary-foreground: #e9ebee;
+  --muted: #252b36;
+  --muted-foreground: #a3aab5;
+  --accent: #252b36;
+  --accent-foreground: #e9ebee;
+  --destructive: #e07a8a;
+  --border: #2d3440;
+  --input: #3a4250;
+  --ring: #a3b4d6;
+  --sidebar: #1b2029;
+  --sidebar-foreground: #e9ebee;
+  --sidebar-primary: #e9ebee;
+  --sidebar-primary-foreground: #14181f;
+  --sidebar-accent: #252b36;
+  --sidebar-accent-foreground: #e9ebee;
+  --sidebar-border: #2d3440;
+  --sidebar-ring: #a3b4d6;
+}
+
+/*
+ * Gäste-Widget: Restaurant-Branding über CSS-Variablen, die serverseitig
+ * gesetzt werden (--brand, --brand-contrast, --font-display).
+ */
+.nova-widget {
+  --primary: var(--brand, var(--nova-bordeaux));
+  --primary-foreground: var(--brand-contrast, #ffffff);
+  --ring: var(--brand, var(--nova-bordeaux));
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+@layer base {
+  /* Uhrzeiten und Zahlen in Listen sauber untereinander */
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--primary);
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}

@@ -1,0 +1,778 @@
+// =============================================================================
+// A&E NOVA Reservierungen – Datenmodell
+// =============================================================================
+// Konventionen
+// - Mandantentrennung: Jede mandantenbezogene Tabelle trägt `restaurantId`
+//   (bzw. `organizationId`). Zugriffe laufen ausschließlich über den
+//   Tenant-Scoped-Client in `src/server/tenancy/` (siehe docs/ARCHITEKTUR.md).
+// - Zeitpunkte werden als UTC (`timestamptz`) gespeichert. Uhrzeiten von
+//   Öffnungszeiten sind lokale Wanduhrzeiten ("HH:MM") in der Zeitzone des
+//   Restaurants – nur so bleiben Schichten über die Sommerzeitumstellung stabil.
+// - Geldbeträge in Cent (Int), Währung ISO 4217 klein ("eur").
+// - Doppelbuchungsschutz: Exclusion-Constraint auf `reservation_tables`
+//   (btree_gist, tstzrange). Prisma kann das nicht ausdrücken, daher steht es
+//   als handgeschriebenes SQL in der ersten Migration (siehe Kommentar bei
+//   `ReservationTable`).
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+  // Verbindungs-URL kommt aus prisma.config.ts (DATABASE_URL), Prisma 7.
+}
+
+// -----------------------------------------------------------------------------
+// Plattform: Tarife, Benutzer, Organisationen
+// -----------------------------------------------------------------------------
+
+enum PlanCode {
+  BASIC
+  PRO
+}
+
+/// Preise und Anzeigename pro Tarif – im Super-Admin editierbar.
+/// Welche Features ein Tarif freischaltet, ist bewusst im Code definiert
+/// (src/server/plans/features.ts), damit Feature-Gates typsicher sind und
+/// nicht durch Datenbankänderungen versehentlich geöffnet werden.
+model Plan {
+  code              PlanCode @id
+  name              String
+  priceMonthlyCents Int // netto
+  currency          String   @default("eur")
+  active            Boolean  @default(true)
+  updatedAt         DateTime @updatedAt
+
+  restaurants Restaurant[]
+
+  @@map("plans")
+}
+
+enum PlatformRole {
+  USER
+  SUPER_ADMIN
+}
+
+model User {
+  id            String       @id @default(cuid())
+  email         String       @unique // immer lowercase gespeichert
+  name          String?
+  passwordHash  String // argon2id
+  platformRole  PlatformRole @default(USER)
+  emailVerified DateTime?
+  disabledAt    DateTime?
+  lastLoginAt   DateTime?
+  createdAt     DateTime     @default(now())
+  updatedAt     DateTime     @updatedAt
+
+  sessions            Session[]
+  memberships         Membership[]
+  passwordResets      PasswordResetToken[]
+  createdReservations Reservation[]        @relation("CreatedBy")
+  auditLogs           AuditLog[]
+
+  @@map("users")
+}
+
+/// Server-seitige Session (httpOnly-Cookie enthält nur das Token, in der DB
+/// liegt ausschließlich der SHA-256-Hash).
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  lastSeenAt DateTime @default(now())
+  userAgent  String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("password_reset_tokens")
+}
+
+/// Der Betrieb (Inhaber) – Vertragspartner und Klammer für 1–3 Standorte.
+model Organization {
+  id        String   @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  memberships Membership[]
+  restaurants Restaurant[]
+  invitations Invitation[]
+
+  @@map("organizations")
+}
+
+enum MemberRole {
+  OWNER
+  STAFF
+}
+
+model Membership {
+  id             String     @id @default(cuid())
+  userId         String
+  organizationId String
+  role           MemberRole
+  createdAt      DateTime   @default(now())
+
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, organizationId])
+  @@index([organizationId])
+  @@map("memberships")
+}
+
+model Invitation {
+  id             String     @id @default(cuid())
+  organizationId String
+  email          String
+  role           MemberRole @default(STAFF)
+  tokenHash      String     @unique
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  createdAt      DateTime   @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("invitations")
+}
+
+// -----------------------------------------------------------------------------
+// Restaurant (= Mandant / Standort) und Einstellungen
+// -----------------------------------------------------------------------------
+
+enum RestaurantStatus {
+  ACTIVE
+  SUSPENDED // vom Super-Admin gesperrt: Widget zeigt Hinweis, keine Buchungen
+}
+
+enum AllocationMode {
+  GUEST_CHOOSES_TABLE // Gast wählt Bereich und Tisch
+  AUTOMATIC // System vergibt; Gast wählt höchstens den Bereich
+}
+
+enum ConfirmationMode {
+  AUTOMATIC
+  MANUAL
+}
+
+enum ThemeMode {
+  LIGHT
+  DARK
+}
+
+enum DepositType {
+  PER_PERSON
+  FLAT
+}
+
+model Restaurant {
+  id             String           @id @default(cuid())
+  organizationId String
+  slug           String           @unique // /r/<slug>
+  name           String
+  status         RestaurantStatus @default(ACTIVE)
+  planCode       PlanCode         @default(BASIC)
+  timezone       String           @default("Europe/Berlin")
+  defaultLocale  String           @default("de")
+
+  // Kontakt / Impressumsangaben für E-Mails und Kalendereinträge
+  email      String // Empfänger für Benachrichtigungen an das Restaurant
+  phone      String?
+  street     String?
+  postalCode String?
+  city       String?
+  country    String  @default("DE")
+  websiteUrl String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization        @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  plan          Plan                @relation(fields: [planCode], references: [code])
+  settings      RestaurantSettings?
+  branding      Branding?
+  stripeAccount StripeAccount?
+
+  areas           Area[]
+  tables          Table[]
+  combinations    TableCombination[]
+  shifts          Shift[]
+  dateExceptions  DateException[]
+  durationRules   DurationRule[]
+  reservations    Reservation[]
+  reservationTabs ReservationTable[]
+  payments        Payment[]
+  emailLogs       EmailLog[]
+  privacyRequests PrivacyRequest[]
+  statsDaily      StatsDaily[]
+  auditLogs       AuditLog[]
+  tableMedia      TableMedia[]
+
+  @@index([organizationId])
+  @@map("restaurants")
+}
+
+/// Buchungsregeln eines Restaurants (1:1).
+model RestaurantSettings {
+  restaurantId String @id
+
+  allocationMode   AllocationMode   @default(AUTOMATIC)
+  confirmationMode ConfirmationMode @default(AUTOMATIC)
+
+  slotIntervalMinutes    Int @default(15)
+  bufferMinutes          Int @default(0) // Puffer nach jeder Buchung (Tisch bleibt blockiert)
+  defaultDurationMinutes Int @default(120) // Fallback, wenn keine DurationRule greift
+
+  minPartySize       Int @default(1)
+  maxPartySizeOnline Int @default(8) // größere Gruppen: Hinweis "bitte anrufen"
+  minLeadTimeMinutes Int @default(60) // frühestens X Minuten vor Beginn online buchbar
+  maxAdvanceDays     Int @default(90) // höchstens X Tage im Voraus
+
+  /// Anteil der Sitzplätze (0–100), der zu jedem Zeitpunkt maximal durch
+  /// Online-Buchungen belegt sein darf. Telefon/Walk-in zählen nicht dagegen.
+  onlineQuotaPercent Int @default(100)
+
+  // Anzahlung (Pro-Tarif, Stripe Connect)
+  depositEnabled          Boolean     @default(false)
+  depositMinPartySize     Int         @default(6)
+  depositType             DepositType @default(PER_PERSON)
+  depositAmountCents      Int         @default(0)
+  cancellationWindowHours Int         @default(24) // kostenlose Stornierung bis X h vorher
+  paymentHoldMinutes      Int         @default(15) // unbezahlte Anfragen verfallen danach
+
+  // DSGVO
+  privacyNoticeDe      String? // eigener Datenschutzhinweis im Widget (Markdown, kurz)
+  privacyNoticeEn      String?
+  privacyPolicyUrl     String? // Link zur vollständigen Datenschutzerklärung des Restaurants
+  privacyNoticeVersion Int     @default(1) // wird bei jeder Textänderung erhöht und bei Buchung gespeichert
+  anonymizeAfterDays   Int     @default(180)
+
+  // Reminder
+  reminderEnabled     Boolean @default(true)
+  reminderHoursBefore Int     @default(24)
+
+  updatedAt DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("restaurant_settings")
+}
+
+/// Widget-Erscheinungsbild pro Restaurant. Im Basic-Tarif werden Logo,
+/// Farbe, Schrift und Modus ebenfalls unterstützt; nur der "powered by"-
+/// Hinweis ist an den Tarif gekoppelt (siehe features.ts).
+model Branding {
+  restaurantId String    @id
+  logoKey      String? // Objekt-Key im S3-kompatiblen EU-Speicher
+  primaryColor String    @default("#6B1E2E") // Hex; Kontrast wird beim Speichern geprüft
+  fontFamily   String    @default("serif-classic") // Schlüssel aus kuratierter Liste (keine beliebigen Google-Fonts-Requests)
+  themeMode    ThemeMode @default(LIGHT)
+  cornerStyle  String    @default("soft") // "sharp" | "soft" | "round"
+  updatedAt    DateTime  @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("brandings")
+}
+
+// -----------------------------------------------------------------------------
+// Bereiche, Tische, Kombinationen, Tischansicht
+// -----------------------------------------------------------------------------
+
+model Area {
+  id             String  @id @default(cuid())
+  restaurantId   String
+  name           String // "Innen", "Terrasse", ...
+  nameEn         String?
+  sortOrder      Int     @default(0)
+  onlineBookable Boolean @default(true)
+
+  // Raumplan: Fläche des Bereichs auf der Zeichenfläche (Einheit: Raster-Pixel)
+  planX      Int     @default(0)
+  planY      Int     @default(0)
+  planWidth  Int     @default(800)
+  planHeight Int     @default(600)
+  planColor  String?
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tables     Table[]
+
+  @@unique([restaurantId, name])
+  @@index([restaurantId])
+  @@map("areas")
+}
+
+enum TableShape {
+  RECT
+  SQUARE
+  ROUND
+}
+
+model Table {
+  id             String  @id @default(cuid())
+  restaurantId   String
+  areaId         String
+  name           String // "T4", "Fenster 2"
+  minCapacity    Int     @default(1)
+  maxCapacity    Int
+  onlineBookable Boolean @default(true)
+  active         Boolean @default(true) // deaktiviert statt gelöscht, damit Historie erhalten bleibt
+  sortOrder      Int     @default(0)
+
+  // Raumplan
+  posX     Float      @default(0)
+  posY     Float      @default(0)
+  rotation Float      @default(0) // Grad
+  width    Float      @default(80)
+  height   Float      @default(80)
+  shape    TableShape @default(RECT)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  restaurant   Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  area         Area               @relation(fields: [areaId], references: [id], onDelete: Restrict)
+  media        TableMedia?
+  combinations CombinationTable[]
+  reservations ReservationTable[]
+
+  @@unique([restaurantId, name])
+  @@index([restaurantId, areaId])
+  @@map("tables")
+}
+
+/// Fest definierte Tischkombination (z. B. T1+T2 für 6–8 Personen).
+/// Bewusst explizit statt "jeder mit jedem": Nur das Restaurant weiß, welche
+/// Tische physisch zusammengeschoben werden können.
+model TableCombination {
+  id             String  @id @default(cuid())
+  restaurantId   String
+  name           String // "T1 + T2"
+  minCapacity    Int
+  maxCapacity    Int
+  onlineBookable Boolean @default(true)
+  active         Boolean @default(true)
+
+  restaurant Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  tables     CombinationTable[]
+
+  @@index([restaurantId])
+  @@map("table_combinations")
+}
+
+model CombinationTable {
+  combinationId String
+  tableId       String
+
+  combination TableCombination @relation(fields: [combinationId], references: [id], onDelete: Cascade)
+  table       Table            @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@id([combinationId, tableId])
+  @@index([tableId])
+  @@map("combination_tables")
+}
+
+/// "So sitzen Sie" – Medium pro Tisch. `kind` ist erweiterbar (VIDEO,
+/// MODEL_3D), die Viewer-Komponente wählt den Renderer anhand von `kind`.
+enum TableMediaKind {
+  PHOTO
+  PANORAMA_360 // equirectangular
+  VIDEO // vorbereitet, noch kein Renderer
+  MODEL_3D // vorbereitet, noch kein Renderer
+}
+
+model TableMedia {
+  id           String         @id @default(cuid())
+  restaurantId String
+  tableId      String         @unique
+  kind         TableMediaKind
+  storageKey   String
+  mimeType     String
+  width        Int?
+  height       Int?
+  bytes        Int?
+  altDe        String?
+  altEn        String?
+  createdAt    DateTime       @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  table      Table      @relation(fields: [tableId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@map("table_media")
+}
+
+// -----------------------------------------------------------------------------
+// Öffnungszeiten, Schichten, Ausnahmen, Verweildauer
+// -----------------------------------------------------------------------------
+
+/// Wiederkehrende Schicht an einem Wochentag. Ein Wochentag ohne Schicht ist
+/// Ruhetag. Mehrere Schichten pro Tag (Mittag/Abend) sind möglich.
+model Shift {
+  id                  String    @id @default(cuid())
+  restaurantId        String
+  name                String // "Mittag", "Abend"
+  weekday             Int // ISO: 1 = Montag … 7 = Sonntag
+  startTime           String // "11:30" lokale Zeit; erster Slot
+  endTime             String // "15:00" Schichtende (Küche/Service schließt)
+  lastSeatingTime     String? // "14:00" letzter buchbarer Slot; null = endTime minus Verweildauer
+  slotIntervalMinutes Int? // optionaler Override der Restaurant-Einstellung
+  validFrom           DateTime? @db.Date // Saisonzeiten (z. B. Terrassensaison)
+  validUntil          DateTime? @db.Date
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, weekday])
+  @@map("shifts")
+}
+
+enum DateExceptionType {
+  CLOSED // Sonderschließung (Betriebsferien, Feiertag)
+  SPECIAL_HOURS // abweichende Öffnungszeiten an genau diesem Datum
+}
+
+model DateException {
+  id              String            @id @default(cuid())
+  restaurantId    String
+  date            DateTime          @db.Date // lokales Datum des Restaurants
+  type            DateExceptionType
+  reason          String?
+  // Nur bei SPECIAL_HOURS: ersetzt alle regulären Schichten dieses Tages
+  startTime       String?
+  endTime         String?
+  lastSeatingTime String?
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, date])
+  @@map("date_exceptions")
+}
+
+/// Verweildauer abhängig von der Personenzahl, z. B. 1–2 P: 90 min,
+/// 3–4 P: 120 min, 5+ P: 150 min.
+model DurationRule {
+  id              String @id @default(cuid())
+  restaurantId    String
+  minPartySize    Int
+  maxPartySize    Int
+  durationMinutes Int
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@map("duration_rules")
+}
+
+// -----------------------------------------------------------------------------
+// Reservierungen
+// -----------------------------------------------------------------------------
+
+enum ReservationStatus {
+  PENDING_PAYMENT // Slot ist reserviert, Anzahlung läuft (verfällt nach paymentHoldMinutes)
+  REQUESTED // angefragt – wartet auf manuelle Freigabe
+  CONFIRMED // bestätigt
+  ARRIVED // eingetroffen
+  NO_SHOW
+  CANCELLED // storniert (Gast oder Restaurant)
+  EXPIRED // Zahlung nicht abgeschlossen / Anfrage abgelehnt-ablaufend
+  DECLINED // Anfrage vom Restaurant abgelehnt
+}
+
+enum ReservationSource {
+  ONLINE // Widget
+  PHONE // manuell im Admin erfasst
+  WALK_IN
+  ADMIN // sonstige manuelle Eingabe
+}
+
+enum CancelledBy {
+  GUEST
+  RESTAURANT
+  SYSTEM
+}
+
+model Reservation {
+  id               String            @id @default(cuid())
+  restaurantId     String
+  code             String // kurze Referenz für Gast & Telefon, z. B. "K7M2QX" (eindeutig pro Restaurant)
+  status           ReservationStatus
+  source           ReservationSource
+  partySize        Int
+  startsAt         DateTime // UTC
+  endsAt           DateTime // UTC, Ende der Verweildauer (ohne Puffer)
+  areaPreferenceId String? // gewünschter Bereich im Auto-Modus (nur Info)
+
+  // Gastdaten – werden nach Ablauf der Frist anonymisiert (Felder auf null)
+  guestName     String?
+  guestEmail    String? // lowercase; Index für Datenexport/Löschung auf Anfrage
+  guestPhone    String?
+  guestNotes    String?
+  locale        String  @default("de")
+  internalNotes String? // nur für das Restaurant; wird mit anonymisiert
+
+  privacyConsentAt     DateTime?
+  privacyNoticeVersion Int?
+
+  /// SHA-256 des Verwaltungs-Tokens aus dem E-Mail-Link. Das Token selbst ist
+  /// HMAC(APP_SECRET, id + tokenVersion) und wird nie gespeichert, kann aber für
+  /// jede Mail (Wiederholung, Erinnerung) neu berechnet werden. Erhöhen von
+  /// `tokenVersion` macht alle bisherigen Links ungültig.
+  manageTokenHash String? @unique
+  tokenVersion    Int     @default(1)
+  /// RFC 5545 SEQUENCE für Kalender-Updates (.ics) – bei jeder Änderung +1.
+  icsSequence     Int     @default(0)
+
+  holdExpiresAt  DateTime? // nur PENDING_PAYMENT
+  confirmedAt    DateTime?
+  arrivedAt      DateTime?
+  cancelledAt    DateTime?
+  cancelledBy    CancelledBy?
+  cancelReason   String?
+  reminderSentAt DateTime?
+  anonymizedAt   DateTime?
+
+  createdById String? // Mitarbeiter bei manueller Erfassung
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  restaurant Restaurant         @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  createdBy  User?              @relation("CreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  tables     ReservationTable[]
+  payment    Payment?
+  emailLogs  EmailLog[]
+
+  @@unique([restaurantId, code])
+  @@index([restaurantId, startsAt])
+  @@index([restaurantId, status, startsAt])
+  @@index([restaurantId, guestEmail])
+  @@index([status, holdExpiresAt]) // Job: unbezahlte Holds freigeben
+  @@index([status, startsAt, reminderSentAt]) // Job: Erinnerungen
+  @@index([anonymizedAt, startsAt]) // Job: Anonymisierung
+  @@map("reservations")
+}
+
+/// Belegung eines Tisches durch eine Reservierung. Bei Kombinationen gibt es
+/// eine Zeile pro beteiligtem Tisch.
+///
+/// Doppelbuchungsschutz (in Migration `0001_init/migration.sql` ergänzt):
+///
+///   CREATE EXTENSION IF NOT EXISTS btree_gist;
+///   ALTER TABLE reservation_tables
+///     ADD CONSTRAINT reservation_tables_no_overlap
+///     EXCLUDE USING gist (
+///       "tableId" WITH =,
+///       tsrange("startsAt", "blockedUntil", '[)') WITH &&
+///     ) WHERE (active);
+///
+/// Bewusst als Ausdruck statt generierter Spalte: Prisma kennt die Spalte so
+/// nicht und erzeugt keinen Migrations-Drift. `[)` = halboffenes Intervall,
+/// d. h. eine Buchung darf exakt dort beginnen, wo die vorherige endet.
+/// (Getestet gegen PostgreSQL 16: Überlappung → Fehler 23P01.)
+///
+/// `active` wird beim Stornieren/Verfallen in derselben Transaktion auf false
+/// gesetzt – dadurch ist der Tisch sofort wieder frei.
+model ReservationTable {
+  id            String   @id @default(cuid())
+  restaurantId  String
+  reservationId String
+  tableId       String
+  startsAt      DateTime // = Reservation.startsAt (denormalisiert für den Constraint)
+  blockedUntil  DateTime // = Reservation.endsAt + bufferMinutes
+  active        Boolean  @default(true)
+
+  restaurant  Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+  table       Table       @relation(fields: [tableId], references: [id], onDelete: Restrict)
+
+  @@unique([reservationId, tableId])
+  @@index([restaurantId, startsAt])
+  @@index([tableId, startsAt])
+  @@map("reservation_tables")
+}
+
+// -----------------------------------------------------------------------------
+// Zahlungen (Stripe Connect, Direct Charges auf dem Konto des Restaurants)
+// -----------------------------------------------------------------------------
+
+model StripeAccount {
+  restaurantId     String   @id
+  stripeAccountId  String   @unique // acct_…
+  chargesEnabled   Boolean  @default(false) // aus account.updated / v2 capability-Events
+  payoutsEnabled   Boolean  @default(false)
+  detailsSubmitted Boolean  @default(false)
+  updatedAt        DateTime @updatedAt
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@map("stripe_accounts")
+}
+
+enum PaymentStatus {
+  PENDING // Checkout-Session offen
+  SUCCEEDED // bezahlt
+  EXPIRED // nicht bezahlt innerhalb der Frist
+  REFUNDED // vollständig erstattet (Storno vor Frist oder manuell)
+  PARTIALLY_REFUNDED
+  FORFEITED // einbehalten (Storno nach Frist oder No-Show)
+}
+
+model Payment {
+  id                String        @id @default(cuid())
+  restaurantId      String
+  reservationId     String        @unique
+  stripeAccountId   String // Konto, auf dem der Direct Charge läuft
+  checkoutSessionId String        @unique
+  paymentIntentId   String?       @unique
+  amountCents       Int
+  currency          String        @default("eur")
+  status            PaymentStatus @default(PENDING)
+  refundedCents     Int           @default(0)
+
+  // Snapshot der Stornoregel zum Buchungszeitpunkt – maßgeblich für
+  // spätere Erstattungsentscheidungen, auch wenn das Restaurant die Regel ändert.
+  cancellationWindowHours Int
+  freeCancellationUntil   DateTime
+
+  paidAt     DateTime?
+  refundedAt DateTime?
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  restaurant  Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  reservation Reservation @relation(fields: [reservationId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId, status])
+  @@map("payments")
+}
+
+/// Idempotenz für Stripe-Webhooks (jedes Event genau einmal verarbeiten).
+model StripeEvent {
+  id          String   @id // evt_…
+  type        String
+  processedAt DateTime @default(now())
+
+  @@map("stripe_events")
+}
+
+// -----------------------------------------------------------------------------
+// E-Mails, Statistiken, DSGVO, Audit
+// -----------------------------------------------------------------------------
+
+enum EmailType {
+  RESERVATION_CONFIRMED
+  RESERVATION_MODIFIED
+  RESERVATION_REQUESTED // Eingangsbestätigung bei manueller Freigabe
+  RESERVATION_DECLINED
+  RESERVATION_CANCELLED_GUEST
+  RESERVATION_CANCELLED_RESTAURANT
+  RESERVATION_REMINDER
+  RESTAURANT_NEW_RESERVATION
+  RESTAURANT_RESERVATION_MODIFIED
+  RESTAURANT_CANCELLATION
+  PAYMENT_REFUNDED
+  STAFF_INVITATION
+  PASSWORD_RESET
+}
+
+enum EmailStatus {
+  QUEUED
+  SENT
+  FAILED
+}
+
+model EmailLog {
+  id                String      @id @default(cuid())
+  restaurantId      String?
+  reservationId     String?
+  type              EmailType
+  status            EmailStatus @default(QUEUED)
+  providerMessageId String?
+  error             String?
+  createdAt         DateTime    @default(now())
+  // bewusst ohne Empfängeradresse/Inhalt: kein zweiter Speicherort für Gastdaten
+
+  restaurant  Restaurant?  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  reservation Reservation? @relation(fields: [reservationId], references: [id], onDelete: SetNull)
+
+  @@index([restaurantId, createdAt])
+  @@map("email_logs")
+}
+
+/// Vorab aggregierte, anonyme Kennzahlen pro Tag. Werden beim Statuswechsel
+/// fortgeschrieben bzw. nachts neu berechnet und überleben die Anonymisierung.
+model StatsDaily {
+  restaurantId       String
+  date               DateTime @db.Date
+  reservations       Int      @default(0) // ohne storniert/verfallen
+  guests             Int      @default(0)
+  onlineReservations Int      @default(0)
+  walkIns            Int      @default(0)
+  noShows            Int      @default(0)
+  cancellations      Int      @default(0)
+  depositsCents      Int      @default(0)
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@id([restaurantId, date])
+  @@map("stats_daily")
+}
+
+enum PrivacyRequestType {
+  EXPORT
+  DELETE
+}
+
+/// Nachweis über bearbeitete Betroffenenanfragen (Art. 15/17 DSGVO).
+/// Enthält die E-Mail nur als Hash, damit der Nachweis selbst keine
+/// Gastdaten konserviert.
+model PrivacyRequest {
+  id            String             @id @default(cuid())
+  restaurantId  String
+  type          PrivacyRequestType
+  emailHash     String
+  affectedCount Int
+  handledById   String?
+  createdAt     DateTime           @default(now())
+
+  restaurant Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+
+  @@index([restaurantId])
+  @@map("privacy_requests")
+}
+
+model AuditLog {
+  id           String   @id @default(cuid())
+  restaurantId String?
+  userId       String?
+  action       String // "reservation.status_changed", "settings.updated", "plan.changed" …
+  entityId     String?
+  meta         Json?
+  createdAt    DateTime @default(now())
+
+  restaurant Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  user       User?       @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([restaurantId, createdAt])
+  @@map("audit_logs")
+}
