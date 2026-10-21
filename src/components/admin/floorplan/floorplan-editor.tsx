@@ -20,6 +20,7 @@ import {
   type PlanTable,
 } from "@/lib/floorplan";
 import { historyReducer, initHistory } from "@/lib/history";
+import { cn } from "@/lib/utils";
 import { PlanInspector } from "./plan-inspector";
 import { NEW_AREA_PREFIX, moveArea, reassignArea, updateArea, updateTable, type Plan, type Selection } from "./plan-ops";
 import { AreaLabel, AreaShapeSvg, TableLabel, TableShapeSvg } from "./plan-shapes";
@@ -85,6 +86,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
       const target = e.target as HTMLElement;
+      if (saving) return;
       if (target.closest("input, textarea, select, [contenteditable]")) return;
       const mod = e.ctrlKey || e.metaKey;
       if (mod && e.key.toLowerCase() === "z") {
@@ -98,7 +100,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo]);
+  }, [undo, redo, saving]);
 
   // Ungespeicherte Änderungen: Warnung beim Schließen und bei Links innerhalb der App
   useEffect(() => {
@@ -132,8 +134,8 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
   const grid = (v: number, e: { altKey: boolean }) => (snapOn && !e.altKey ? snap(v) : Math.round(v));
 
   const startDrag = (e: PointerEvent, next: Drag, select: Selection) => {
-    if (e.button !== 0) return;
-    e.stopPropagation();
+    e.stopPropagation(); // auch Rechtsklick soll die Auswahl nicht aufheben
+    if (e.button !== 0 || saving) return;
     svgRef.current?.setPointerCapture(e.pointerId);
     drag.current = next;
     setMinSize(canvas);
@@ -299,10 +301,10 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
     <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
       <div className="min-w-0 flex-1 rounded-lg border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b px-3 py-2" role="toolbar" aria-label="Raumplan bearbeiten">
-          <Button type="button" variant="ghost" size="icon" onClick={undo} disabled={history.past.length === 0} aria-label="Rückgängig (Strg+Z)" title="Rückgängig (Strg+Z)">
+          <Button type="button" variant="ghost" size="icon" onClick={undo} disabled={history.past.length === 0 || saving} aria-label="Rückgängig (Strg+Z)" title="Rückgängig (Strg+Z)">
             <Undo2 />
           </Button>
-          <Button type="button" variant="ghost" size="icon" onClick={redo} disabled={history.future.length === 0} aria-label="Wiederholen (Strg+Umschalt+Z)" title="Wiederholen (Strg+Umschalt+Z)">
+          <Button type="button" variant="ghost" size="icon" onClick={redo} disabled={history.future.length === 0 || saving} aria-label="Wiederholen (Strg+Umschalt+Z)" title="Wiederholen (Strg+Umschalt+Z)">
             <Redo2 />
           </Button>
           <span className="mx-1 h-5 w-px bg-border" aria-hidden />
@@ -325,7 +327,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
           <Button type="button" variant={snapOn ? "secondary" : "ghost"} size="sm" onClick={() => setSnapOn((v) => !v)} aria-pressed={snapOn}>
             <Grid3x3 /> Raster
           </Button>
-          <Button type="button" variant="outline" size="sm" onClick={addArea}>
+          <Button type="button" variant="outline" size="sm" onClick={addArea} disabled={saving}>
             <Plus /> Bereich
           </Button>
           <div className="ml-auto flex items-center gap-2">
@@ -344,7 +346,8 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
           </div>
         </div>
 
-        <div ref={scroller} className="max-h-[70vh] overflow-auto bg-[var(--nova-porzellan)]">
+        {/* Während des Speicherns gesperrt: Änderungen in dieser Zeit gingen beim Übernehmen des Ergebnisses verloren */}
+        <div ref={scroller} inert={saving} aria-busy={saving} className={cn("max-h-[70vh] overflow-auto bg-[var(--nova-porzellan)]", saving && "opacity-70")}>
           <svg
             ref={svgRef}
             width={canvas.width * scale}
@@ -473,6 +476,7 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
       </div>
 
       <PlanInspector
+        disabled={saving}
         plan={plan}
         table={selectedTable}
         area={selectedArea}

@@ -11,6 +11,7 @@ import {
   type PlanArea,
   type PlanTable,
 } from "@/lib/floorplan";
+import { moveArea, updateArea, updateTable } from "@/components/admin/floorplan/plan-ops";
 import { HISTORY_LIMIT, historyReducer, initHistory } from "@/lib/history";
 
 const area = (id: string, x: number, y: number, width: number, height: number): PlanArea => ({ id, name: id, x, y, width, height, color: null });
@@ -117,5 +118,21 @@ describe("Verlauf (Rückgängig/Wiederholen)", () => {
     expect(h.past).toEqual([]);
     for (let i = 1; i <= HISTORY_LIMIT + 20; i++) h = historyReducer(h, { type: "commit", update: () => i });
     expect(h.past).toHaveLength(HISTORY_LIMIT);
+  });
+});
+
+describe("Änderungsfunktionen des Editors", () => {
+  it("liefern bei unveränderten Werten denselben Plan (kein leerer Verlaufsschritt)", () => {
+    const plan = { areas: [area("a", 0, 0, 400, 300)], tables: [table({ x: 100, y: 100 })] };
+    expect(updateTable(plan, "t", (t) => ({ ...t, x: 101 - 1 }))).toBe(plan);
+    expect(updateTable(plan, "t", (t) => ({ ...t, width: 5000, height: 60 })).tables[0].width).toBe(400);
+    expect(updateArea(plan, "a", (a) => ({ ...a }))).toBe(plan);
+    expect(moveArea(plan, "a", 0, 0)).toBe(plan);
+  });
+
+  it("lässt platzierte Tische nicht auf (0, 0) – das hieße „nicht platziert“", () => {
+    const plan = { areas: [area("a", 20, 20, 400, 300)], tables: [table({ x: 20, y: 20 })] };
+    expect(updateTable(plan, "t", (t) => ({ ...t, x: -5, y: -5 })).tables[0]).toMatchObject({ x: 1, y: 0 });
+    expect(moveArea(plan, "a", 0, 0).tables[0]).toMatchObject({ x: 1, y: 0 });
   });
 });

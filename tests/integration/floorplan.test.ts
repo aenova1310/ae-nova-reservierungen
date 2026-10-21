@@ -90,6 +90,17 @@ describe("Raumplan speichern", () => {
     await expect(saveFloorplan(pro, dup, userId)).rejects.toThrow(/doppelt/);
   });
 
+  it("erlaubt das Tauschen von Bereichsnamen", async () => {
+    const { pro, userId } = await setup();
+    await db.area.create({ data: { restaurantId: pro.id, name: "Terrasse" } });
+    const payload = await payloadFor(pro.id);
+    const names = payload.areas.map((a) => a.name);
+    payload.areas = payload.areas.map((a, i) => ({ ...a, name: names[1 - i] }));
+    const saved = await saveFloorplan(pro, payload, userId);
+    expect(saved.areas.map((a) => a.name).sort()).toEqual([...names].sort());
+    expect(saved.areas.find((a) => a.id === payload.areas[0].id)!.name).toBe(names[1]);
+  });
+
   it("weist ungültige Eingaben per Schema ab", async () => {
     const { pro, userId } = await setup();
     const payload = await payloadFor(pro.id);

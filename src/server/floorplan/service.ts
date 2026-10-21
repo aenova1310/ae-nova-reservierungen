@@ -154,6 +154,13 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
     if (!sameSet(existingAreaIds, current.areas.map((a) => a.id))) throw new FloorplanError("Unbekannter oder fehlender Bereich.");
     if (!sameSet(payload.tables.map((t) => t.id), current.tables.map((t) => t.id))) throw new FloorplanError("Unbekannter oder fehlender Tisch.");
 
+    // Umbenennungen zweistufig: erst Platzhalternamen, sonst scheitern Tausch oder
+    // Kette ("A→B, B→C") am eindeutigen Namen je Restaurant
+    const renamed = payload.areas.filter((a) => !a.id.startsWith(NEW_AREA_PREFIX) && current.areas.find((c) => c.id === a.id)?.name !== a.name);
+    for (const a of renamed) {
+      await tx.area.update({ where: { id: a.id, restaurantId: restaurant.id }, data: { name: `__umbenennen__${a.id}` } });
+    }
+
     // Neue Bereiche anlegen, temporäre IDs auf echte abbilden
     const idMap = new Map(existingAreaIds.map((id) => [id, id]));
     let sortOrder = current.areas.length;

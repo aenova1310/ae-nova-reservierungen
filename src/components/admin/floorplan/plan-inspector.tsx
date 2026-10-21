@@ -15,6 +15,7 @@ import { placeTable, updateArea, updateTable, type Plan, type Selection } from "
  * per Zahleneingabe einstellen.
  */
 interface Props {
+  disabled: boolean;
   plan: Plan;
   table?: PlanTable;
   area?: PlanArea;
@@ -47,6 +48,8 @@ function NumberInput({ label, value, onCommit, suffix }: NumberFieldProps) {
     const n = Number(text.replace(",", "."));
     if (text.trim() === "" || !Number.isFinite(n)) return setText(String(Math.round(value)));
     if (Math.round(n) !== Math.round(value)) onCommit(n);
+    // Wird der Wert auf die Grenzen zurückgesetzt, ändert sich der Schlüssel nicht – Anzeige selbst angleichen
+    setText(String(Math.round(value)));
   };
   return (
     <div className="space-y-1">
@@ -111,7 +114,14 @@ function TablePanel({ table: t, plan, commit, rotateStep }: { table: PlanTable }
                 t.shape === s.value ? "bg-card shadow-sm" : "text-muted-foreground hover:text-foreground",
               )}
             >
-              <input type="radio" name={`shape-${t.id}`} value={s.value} checked={t.shape === s.value} onChange={() => update((x) => ({ ...x, shape: s.value }))} className="sr-only" />
+              <input type="radio" name={`shape-${t.id}`} value={s.value} checked={t.shape === s.value} onChange={() =>
+                  update((x) => {
+                    // Gleiche Seiten bei quadratisch/rund: Mitte bleibt stehen
+                    const side = s.value === "RECT" ? null : Math.max(x.width, x.height);
+                    const c = tableCenter(x);
+                    return side ? { ...x, shape: s.value, width: side, height: side, x: c.x - side / 2, y: c.y - side / 2 } : { ...x, shape: s.value };
+                  })
+                } className="sr-only" />
               {s.label}
             </label>
           ))}
@@ -247,7 +257,7 @@ function AreaPanel({ area: a, plan, commit, onSelect, isNewArea }: { area: PlanA
 export function PlanInspector(props: Props) {
   const { plan, table, area, unplaced, commit, onSelect } = props;
   return (
-    <aside className="w-full shrink-0 space-y-4 xl:sticky xl:top-4 xl:w-80" aria-label="Eigenschaften">
+    <aside className="w-full shrink-0 space-y-4 xl:sticky xl:top-4 xl:w-80" aria-label="Eigenschaften" inert={props.disabled}>
       {table ? <TablePanel table={table} {...props} /> : null}
       {area ? <AreaPanel area={area} {...props} /> : null}
       {!table && !area ? (

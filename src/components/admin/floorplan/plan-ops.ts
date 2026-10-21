@@ -11,20 +11,37 @@ export type Selection = { kind: "table" | "area"; id: string } | null;
 /** Neue Bereiche tragen bis zum Speichern eine temporäre ID (Server vergibt die echte). */
 export const NEW_AREA_PREFIX = "new:";
 
+const sameValues = <T extends object>(a: T, b: T) => (Object.keys(a) as (keyof T)[]).every((k) => a[k] === b[k]);
+
+/** (0, 0) bedeutet "nicht platziert" – ein platzierter Tisch darf nicht versehentlich dorthin rutschen. */
+function placedTable(before: PlanTable, next: PlanTable): PlanTable {
+  const t = sanitizeTable(next);
+  const kept = isUnplaced(t) && !isUnplaced(before) ? { ...t, x: 1 } : t;
+  // Unverändert → altes Objekt, damit Verlauf und "ungespeichert" nicht ohne Änderung anspringen
+  return sameValues(before, kept) ? before : kept;
+}
+
 export function updateTable(p: Plan, id: string, fn: (t: PlanTable) => PlanTable): Plan {
-  return {
-    ...p,
-    tables: p.tables.map((t) => {
-      if (t.id !== id) return t;
-      const next = sanitizeTable(fn(t));
-      // (0, 0) bedeutet "nicht platziert" – ein platzierter Tisch darf nicht versehentlich dorthin rutschen
-      return isUnplaced(next) && !isUnplaced(t) ? { ...next, x: 1 } : next;
-    }),
-  };
+  let changed = false;
+  const tables = p.tables.map((t) => {
+    if (t.id !== id) return t;
+    const next = placedTable(t, fn(t));
+    changed ||= next !== t;
+    return next;
+  });
+  return changed ? { ...p, tables } : p;
 }
 
 export function updateArea(p: Plan, id: string, fn: (a: PlanArea) => PlanArea): Plan {
-  return { ...p, areas: p.areas.map((a) => (a.id === id ? sanitizeArea(fn(a)) : a)) };
+  let changed = false;
+  const areas = p.areas.map((a) => {
+    if (a.id !== id) return a;
+    const next = sanitizeArea(fn(a));
+    if (sameValues(a, next)) return a;
+    changed = true;
+    return next;
+  });
+  return changed ? { ...p, areas } : p;
 }
 
 /** Bereich verschieben; seine platzierten Tische wandern mit. */
@@ -38,7 +55,7 @@ export function moveArea(p: Plan, id: string, x: number, y: number): Plan {
   if (dx === 0 && dy === 0) return p;
   return {
     ...moved,
-    tables: moved.tables.map((t) => (t.areaId === id && !isUnplaced(t) ? sanitizeTable({ ...t, x: t.x + dx, y: t.y + dy }) : t)),
+    tables: moved.tables.map((t) => (t.areaId === id && !isUnplaced(t) ? placedTable(t, { ...t, x: t.x + dx, y: t.y + dy }) : t)),
   };
 }
 
