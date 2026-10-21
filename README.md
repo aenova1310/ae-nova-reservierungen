@@ -17,12 +17,13 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | Einbindung | `<script>` (Button mit Dialog oder inline) und `<iframe>` mit automatischer Höhe; Code-Generator mit Live-Vorschau |
 | Admin | Heute-Übersicht, Reservierungsliste (Filter, Suche, Status), Detail mit Verlauf, Umbuchen, Storno, Telefon-/Walk-in-Erfassung, Tagesplan pro Tisch, Tische/Bereiche/Kombinationen, Öffnungszeiten/Schichten/Ruhetage/Sonderschließungen, Verweildauer, Puffer, Slot-Raster, Online-Kontingent, Bestätigungsmodus, Branding, Datenschutztext, Team |
 | Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
+| Super-Admin | `/superadmin`: Mandantenübersicht mit Buchungsvolumen und Monatsumsatz, Restaurant inkl. Inhaber-Zugang anlegen, sperren/freischalten, Tarif wechseln, Preise pflegen |
 | DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
 
 **Noch nicht enthalten (geplant):** Phase 2 – Raumplan-Editor, Tischansicht/360°-Viewer und
 Medien-Upload (die Komponente `TableViewPreview` mit Renderer-Registry ist vorbereitet, zeigt aber
 bis dahin den Platzhalter), Anzahlung mit Stripe Connect (Datenmodell und Status
-`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt), Statistiken, Super-Admin-Oberfläche,
+`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt), Statistiken,
 Logo-Upload. Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
 Passwort-Zurücksetzen per Mail.
 
@@ -43,7 +44,7 @@ npm run dev                     # http://localhost:3000
 | Gäste-Widget | http://localhost:3000/r/pastahaus | – |
 | Admin (Inhaberin) | http://localhost:3000/admin/login | `inhaber@pastahaus.de` / `pastahaus-demo` |
 | Admin (Mitarbeiter) | dito | `service@pastahaus.de` / `pastahaus-demo` |
-| Super-Admin | dito | `admin@ae-nova.de` / `nova-superadmin` (sieht alle Restaurants) |
+| Super-Admin | dito → `/superadmin` | `admin@ae-nova.de` / `nova-superadmin` (Mandanten anlegen, sperren, Tarife) |
 | Zweites Restaurant (Basic) | http://localhost:3000/r/bistro-lumen | – |
 
 Ohne `RESEND_API_KEY` werden E-Mails nicht verschickt, sondern als HTML (plus `.ics`) unter
