@@ -48,14 +48,26 @@ services:
       setup: { condition: service_completed_successfully }
     restart: unless-stopped
 
+  # Hintergrundjobs. Skript bewusst direkt hier statt als eingebundene Datei:
+  # Docker Desktop (Mac) darf nicht auf jeden Ordner zugreifen (z. B. /Applications).
   cron:
     image: curlimages/curl:8.11.1
-    entrypoint: ["/bin/sh", "/jobs/cron.sh"]
     environment:
       TARGET: http://app:3000
       CRON_SECRET: lokal-cron-secret
-    volumes:
-      - ../docker/cron.sh:/jobs/cron.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        call() { curl -fsS -X POST -H "Authorization: Bearer $$CRON_SECRET" "$$TARGET/api/cron/$$1" >/dev/null || echo "cron: $$1 fehlgeschlagen"; }
+        minute=0
+        while true; do
+          call expire-holds
+          [ $$((minute % 5)) -eq 0 ] && call send-emails
+          [ $$((minute % 15)) -eq 0 ] && call send-reminders
+          if [ "$$(date -u +%H%M)" = "0300" ]; then call anonymize; call cleanup; fi
+          minute=$$((minute + 1))
+          sleep 60
+        done
     depends_on: [app]
     restart: unless-stopped
 
