@@ -11,6 +11,7 @@ const NAV: NavItem[] = [
   { href: "/timeline", label: "Tagesplan", icon: "timeline" },
   { href: "/statistik", label: "Statistik", icon: "stats" },
   { href: "/tische", label: "Tische & Bereiche", icon: "tables" },
+  { href: "/raumplan", label: "Raumplan", icon: "floorplan" },
   { href: "/oeffnungszeiten", label: "Öffnungszeiten", icon: "hours" },
   { href: "/einstellungen", label: "Einstellungen", icon: "settings", ownerOnly: true },
   { href: "/einbinden", label: "Website-Einbindung", icon: "embed" },

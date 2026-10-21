@@ -19,10 +19,11 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
 | Super-Admin | `/superadmin`: Mandantenübersicht mit Buchungsvolumen und Monatsumsatz, Restaurant inkl. Inhaber-Zugang anlegen, sperren/freischalten, Tarif wechseln, Preise pflegen |
 | Medien | Logo (alle Tarife) und Tischansicht „So sitzen Sie“ (Pro): Foto mit Vergrößern (Browser-Vollbild, auch im iframe) oder interaktives 360°-Panorama (Photo Sphere Viewer, lokal gebündelt, erst bei Bedarf geladen). Upload mit Ziehen & Ablegen; Bilder werden serverseitig gedreht, verkleinert, in WebP/PNG umgewandelt und von **allen Metadaten (GPS, Kamera)** befreit; SVG wird abgelehnt |
+| Raumplan (Pro) | SVG-Editor: Bereiche anlegen, verschieben und in der Größe ändern (Tische wandern mit); Tische ziehen, drehen, Größe und Form (rechteckig/quadratisch/rund) ändern; Raster, Zoom, Rückgängig/Wiederholen, Warnung bei ungespeicherten Änderungen. Ein Tisch, der in einen anderen Bereich gezogen wird, wechselt den Bereich. Vollständig per Tastatur bedienbar und alle Werte auch als Zahlen einstellbar; Speichern in einer Transaktion mit Konfliktprüfung |
 | Statistik (Pro) | Reservierungen, Gäste, No-Show-Quote, Online-Anteil, Stornierungen pro Woche/Monat mit Vergleich zum Vorzeitraum; Auslastungs-Heatmap Wochentag × Uhrzeit; Tabellenansicht; im Basic-Tarif serverseitig gesperrt |
 | DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
 
-**Noch nicht enthalten (geplant):** Phase 2 – Raumplan-Editor, Anzahlung mit Stripe Connect (Datenmodell und Status
+**Noch nicht enthalten (geplant):** Phase 2 – Anzahlung mit Stripe Connect (Datenmodell und Status
 `PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt). Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
 Passwort-Zurücksetzen per Mail.
 
