@@ -578,6 +578,8 @@ Performance.
 | Medien-Upload | vorab signierte URL direkt in den Bucket | Upload über den Server (`/api/admin/media`) | jedes Bild wird vor dem Speichern geprüft, gedreht, verkleinert und von Metadaten (GPS) befreit; kein öffentlicher Bucket nötig |
 | Medien-Auslieferung | (offen) | über die eigene Domain `/media/<key>` | Widget lädt nichts von Dritten (TDDDG), Bucket bleibt privat, Speicher austauschbar ohne URL-Änderung |
 | Tischansicht im Widget | Lightbox (Dialog) | inline + Browser-Vollbild; 360°-Viewer erst auf Klick | ein Dialog läge im eingebetteten iframe (Auto-Höhe) außerhalb des sichtbaren Bereichs; three.js (~620 kB) nur bei Bedarf |
+| Raumplan-Editor | dnd-kit | eigene Zeigerbedienung im SVG (`getScreenCTM`, Pointer Capture) | Drehen und Größenändern gedrehter Tische braucht ohnehin eigene Geometrie; keine Zusatzabhängigkeit |
+| Raumplan speichern | (offen) | ganzer Plan in einer Transaktion, Version = Hash über alle angezeigten Werte | wurde zwischenzeitlich etwas geändert (auch auf „Tische & Bereiche“), wird abgelehnt statt still überschrieben |
 | Formulare im Admin | `<form action>` | `onSubmit` + `startTransition` | React 19 setzt Formulare nach Form-Actions zurück – bei Validierungsfehlern gingen Eingaben verloren |
 
 **Geprüft:** 50 Unit-Tests, 16 Integrationstests gegen PostgreSQL 16 (u. a. 12 parallele Buchungen →
