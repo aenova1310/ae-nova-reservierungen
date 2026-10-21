@@ -580,6 +580,7 @@ Performance.
 | Tischansicht im Widget | Lightbox (Dialog) | inline + Browser-Vollbild; 360°-Viewer erst auf Klick | ein Dialog läge im eingebetteten iframe (Auto-Höhe) außerhalb des sichtbaren Bereichs; three.js (~620 kB) nur bei Bedarf |
 | Raumplan-Editor | dnd-kit | eigene Zeigerbedienung im SVG (`getScreenCTM`, Pointer Capture) | Drehen und Größenändern gedrehter Tische braucht ohnehin eigene Geometrie; keine Zusatzabhängigkeit |
 | Raumplan speichern | (offen) | ganzer Plan in einer Transaktion, Version = Hash über alle angezeigten Werte | wurde zwischenzeitlich etwas geändert (auch auf „Tische & Bereiche“), wird abgelehnt statt still überschrieben |
+| Konto-Mails (Passwort, Einladung) | Outbox | direkter Versand mit Protokolleintrag (ohne Nachversand) | der Link enthält ein Einmal-Token, das nur als Hash gespeichert ist – beim Nachversand wäre es nicht mehr rekonstruierbar; Fehler sieht die einladende Person sofort |
 | Formulare im Admin | `<form action>` | `onSubmit` + `startTransition` | React 19 setzt Formulare nach Form-Actions zurück – bei Validierungsfehlern gingen Eingaben verloren |
 
 **Geprüft:** 50 Unit-Tests, 16 Integrationstests gegen PostgreSQL 16 (u. a. 12 parallele Buchungen →
@@ -591,5 +592,4 @@ Resend (ohne API-Schlüssel nur Datei-Outbox).
 
 **Vorbereitet, aber noch ohne Funktion** (bewusst, Phase 2/3): Renderer für Video/3D in der
 `TableViewPreview`-Registry, Status `PENDING_PAYMENT`/Job `expire-holds` (ohne Stripe-Fluss),
-`StatsDaily` (Kennzahlen kommen in Phase 2),
-`PasswordResetToken`/`Invitation` (Mitarbeiter werden im MVP mit Startpasswort angelegt).
+`StatsDaily` (Kennzahlen kommen in Phase 2).

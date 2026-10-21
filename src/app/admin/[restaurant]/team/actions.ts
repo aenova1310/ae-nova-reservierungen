@@ -3,51 +3,64 @@
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import type { ActionResult } from "@/lib/action-result";
-import { hashPassword, PASSWORD_MIN_LENGTH } from "@/server/auth/password";
+import { AccountError, inviteMember, resendInvitation, revokeInvitation } from "@/server/auth/account";
 import { db } from "@/server/db";
 import { formObject, runAction, UserFacingError } from "@/server/http/admin-action";
-import { maxMembers } from "@/server/plans/features";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 
-const memberSchema = z.object({
-  name: z.string().min(2, "Name fehlt").max(80),
-  email: z.string().email("Ungültige E-Mail").transform((e) => e.toLowerCase()),
-  password: z.string().min(PASSWORD_MIN_LENGTH, `Mindestens ${PASSWORD_MIN_LENGTH} Zeichen`),
+const inviteSchema = z.object({
+  email: z.string().trim().email("Ungültige E-Mail").transform((e) => e.toLowerCase()),
   role: z.enum(["STAFF", "OWNER"]),
 });
 
-/**
- * Mitarbeiter-Zugang anlegen. Tarif-Gate serverseitig: Basic erlaubt genau einen
- * Zugang (den Inhaber), Pro unbegrenzt.
- */
-export async function addMemberAction(slug: string, _prev: ActionResult, formData: FormData) {
+/** Kontext für Einladungen: Tarif-Gate (Basic: genau ein Zugang) prüft der Konto-Service. */
+async function inviteContext(slug: string) {
+  const { restaurant, user } = await requireRestaurantAccess(slug, { ownerOnly: true });
+  return {
+    organizationId: restaurant.organizationId,
+    restaurantId: restaurant.id,
+    restaurantName: restaurant.name,
+    planCode: restaurant.planCode,
+    invitedByName: user.name ?? user.email,
+  };
+}
+
+/** Konto-Fehler als Meldung anzeigen. */
+async function accountAction(fn: () => Promise<string>) {
   return runAction(async () => {
-    const { restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
-    const data = memberSchema.parse(formObject(formData));
-    const count = await db.membership.count({ where: { organizationId: restaurant.organizationId } });
-    if (count >= maxMembers(restaurant.planCode)) {
-      throw new UserFacingError("Im Basic-Tarif ist ein Admin-Zugang enthalten. Für weitere Mitarbeiter-Zugänge bitte auf Pro wechseln.");
+    try {
+      return await fn();
+    } catch (error) {
+      if (error instanceof AccountError) throw new UserFacingError(error.message);
+      throw error;
     }
-    const existing = await db.user.findUnique({ where: { email: data.email } });
-    if (existing) {
-      const already = await db.membership.findUnique({
-        where: { userId_organizationId: { userId: existing.id, organizationId: restaurant.organizationId } },
-      });
-      if (already) throw new UserFacingError("Diese Person hat bereits Zugang.");
-      // Bestehendes Konto (z. B. aus anderem Betrieb): Passwort nicht überschreiben
-      await db.membership.create({ data: { userId: existing.id, organizationId: restaurant.organizationId, role: data.role } });
-    } else {
-      await db.user.create({
-        data: {
-          email: data.email,
-          name: data.name,
-          passwordHash: await hashPassword(data.password),
-          memberships: { create: { organizationId: restaurant.organizationId, role: data.role } },
-        },
-      });
-    }
+  });
+}
+
+export async function inviteMemberAction(slug: string, _prev: ActionResult, formData: FormData) {
+  return accountAction(async () => {
+    const ctx = await inviteContext(slug);
+    const data = inviteSchema.parse(formObject(formData));
+    await inviteMember(ctx, data.email, data.role);
     revalidatePath(`/admin/${slug}/team`);
-    return `Zugang für ${data.email} angelegt. Bitte das Startpasswort persönlich weitergeben.`;
+    return `Einladung an ${data.email} gesendet.`;
+  });
+}
+
+export async function resendInvitationAction(slug: string, invitationId: string) {
+  return accountAction(async () => {
+    const email = await resendInvitation(await inviteContext(slug), invitationId);
+    revalidatePath(`/admin/${slug}/team`);
+    return `Neue Einladung an ${email} gesendet.`;
+  });
+}
+
+export async function revokeInvitationAction(slug: string, invitationId: string) {
+  return accountAction(async () => {
+    const { organizationId } = await inviteContext(slug);
+    await revokeInvitation(organizationId, invitationId);
+    revalidatePath(`/admin/${slug}/team`);
+    return "Einladung zurückgezogen.";
   });
 }
 
