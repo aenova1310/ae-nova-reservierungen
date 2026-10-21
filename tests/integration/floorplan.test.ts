@@ -57,7 +57,7 @@ describe("Raumplan speichern", () => {
     const payload = await payloadFor(pro.id);
     // Jemand legt zwischenzeitlich einen Tisch an
     await db.table.create({ data: { restaurantId: pro.id, areaId: area.id, name: "T3", maxCapacity: 2 } });
-    await expect(saveFloorplan(pro, payload, userId)).rejects.toThrow(/zwischenzeitlich geändert/);
+    await expect(saveFloorplan(pro, payload, userId)).rejects.toThrow("fp.err.changed");
   });
 
   it("akzeptiert keine Tische oder Bereiche eines anderen Restaurants", async () => {
@@ -85,9 +85,9 @@ describe("Raumplan speichern", () => {
   it("verlangt den vollständigen Plan und eindeutige Bereichsnamen", async () => {
     const { pro, userId } = await setup();
     const payload = await payloadFor(pro.id);
-    await expect(saveFloorplan(pro, { ...payload, tables: payload.tables.slice(1) }, userId)).rejects.toThrow(/fehlender Tisch/);
+    await expect(saveFloorplan(pro, { ...payload, tables: payload.tables.slice(1) }, userId)).rejects.toThrow("fp.err.tableMismatch");
     const dup = { ...payload, areas: [...payload.areas, { ...payload.areas[0], id: "new:x", name: payload.areas[0].name.toUpperCase() }] };
-    await expect(saveFloorplan(pro, dup, userId)).rejects.toThrow(/doppelt/);
+    await expect(saveFloorplan(pro, dup, userId)).rejects.toThrow("fp.err.duplicateArea");
   });
 
   it("erlaubt das Tauschen von Bereichsnamen", async () => {

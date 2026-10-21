@@ -1,3 +1,4 @@
+import { useAdminT } from "@/components/admin/i18n-provider";
 import type { PlanArea, PlanTable } from "@/lib/floorplan";
 
 /**
@@ -63,6 +64,7 @@ export function TableShapeSvg({ table, selected }: { table: PlanTable; selected:
 
 /** Beschriftung bleibt aufrecht, auch wenn der Tisch gedreht ist. */
 export function TableLabel({ table }: { table: PlanTable }) {
+  const { t } = useAdminT();
   const cx = table.x + table.width / 2;
   const cy = table.y + table.height / 2;
   const capacity = table.minCapacity === table.maxCapacity ? `${table.maxCapacity}` : `${table.minCapacity}–${table.maxCapacity}`;
@@ -72,7 +74,7 @@ export function TableLabel({ table }: { table: PlanTable }) {
         {table.name}
       </tspan>
       <tspan x={cx} dy="1.2em" fontSize={11} fill="var(--nova-schiefer)">
-        {table.active ? `${capacity} P.` : "inaktiv"}
+        {table.active ? t("fp.seatsShort", { capacity }) : t("fp.inactive")}
       </tspan>
     </text>
   );
