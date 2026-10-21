@@ -1,5 +1,5 @@
 import "server-only";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readdir, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { Resend } from "resend";
 import { env } from "../env";
@@ -46,8 +46,9 @@ class ResendProvider implements EmailProvider {
 }
 
 /**
- * Entwicklung: Mails werden nicht verschickt, sondern als HTML-Datei unter
- * `.mail-outbox/` abgelegt (inkl. .ics) und in der Konsole angekündigt.
+ * Ohne RESEND_API_KEY (Entwicklung, Test-Server): Mails werden nicht verschickt,
+ * sondern unter `.mail-outbox/` abgelegt – als HTML (Ansicht), als Text (für
+ * `deploy/mails.sh`) und mit Anhängen. Der Job `cleanup` löscht sie nach 14 Tagen.
  */
 class FileProvider implements EmailProvider {
   async send(message: EmailMessage) {
@@ -56,12 +57,34 @@ class FileProvider implements EmailProvider {
     const id = `${new Date().toISOString().replace(/[:.]/g, "-")}-${Math.random().toString(36).slice(2, 8)}`;
     const header = `<!-- To: ${message.to}\n     Subject: ${message.subject}\n     Reply-To: ${message.replyTo ?? "-"} -->\n`;
     await writeFile(path.join(dir, `${id}.html`), header + message.html, "utf8");
+    await writeFile(path.join(dir, `${id}.txt`), `To: ${message.to}\nSubject: ${message.subject}\n\n${message.text}\n`, "utf8");
     for (const a of message.attachments ?? []) {
       await writeFile(path.join(dir, `${id}-${a.filename}`), a.content, "utf8");
     }
     console.info(`[mail] ${message.subject} → ${message.to} (.mail-outbox/${id}.html)`);
     return { id: `file-${id}` };
   }
+}
+
+/** Abgelegte Mails nach `days` Tagen löschen (enthalten Gastdaten). Liefert die Anzahl gelöschter Dateien. */
+export async function pruneFileOutbox(days = 14): Promise<number> {
+  const dir = path.join(process.cwd(), ".mail-outbox");
+  const cutoff = Date.now() - days * 86_400_000;
+  let removed = 0;
+  let names: string[];
+  try {
+    names = await readdir(dir);
+  } catch {
+    return 0; // kein Ordner → nichts zu tun
+  }
+  for (const name of names) {
+    const file = path.join(dir, name);
+    if ((await stat(file)).mtimeMs < cutoff) {
+      await rm(file, { force: true });
+      removed++;
+    }
+  }
+  return removed;
 }
 
 let provider: EmailProvider | null = null;

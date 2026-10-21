@@ -1,0 +1,10 @@
+# HTTPS-Zertifikat kommt automatisch (Let's Encrypt). $DOMAIN aus deploy/.env.
+{$DOMAIN} {
+	encode zstd gzip
+	# Caddy hängt die Client-IP an X-Forwarded-For an (wird für Rate-Limits genutzt)
+	reverse_proxy app:3000
+	header {
+		Strict-Transport-Security "max-age=31536000"
+		-Server
+	}
+}

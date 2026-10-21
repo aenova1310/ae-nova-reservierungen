@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "../db";
 import { retryPendingEmails } from "../email/outbox";
+import { pruneFileOutbox } from "../email/provider";
 import { sendReminders } from "../email/reminders";
 import { runAnonymization } from "../privacy/anonymize";
 import { expireStaleHolds, lockRestaurant } from "../reservations/create";
@@ -43,7 +44,8 @@ export const JOBS = {
     const invitations = await db.invitation.deleteMany({
       where: { OR: [{ acceptedAt: null, expiresAt: { lt: monthAgo } }, { acceptedAt: { lt: monthAgo } }] },
     });
-    return { sessions: sessions.count, resets: resets.count, invitations: invitations.count };
+    const outboxFiles = await pruneFileOutbox();
+    return { sessions: sessions.count, resets: resets.count, invitations: invitations.count, outboxFiles };
   },
 } as const;
 

@@ -3,7 +3,8 @@
  * Schichten, Tischkombinationen und Beispielbuchungen rund um heute.
  *
  * Aufruf: npm run db:seed (idempotent für Tarife/Benutzer; das Demo-Restaurant
- * wird bei jedem Lauf neu aufgebaut).
+ * wird bei jedem Lauf neu aufgebaut). Mit SEED_IF_EMPTY=1 passiert nichts, sobald
+ * es schon ein Restaurant gibt (lokaler Start: eigene Änderungen bleiben erhalten).
  */
 import "dotenv/config";
 import { db } from "../src/server/db";
@@ -24,6 +25,10 @@ async function upsertUser(email: string, name: string, password: string, platfor
 }
 
 async function main() {
+  if (process.env.SEED_IF_EMPTY === "1" && (await db.restaurant.count()) > 0) {
+    console.log("Demo-Daten vorhanden – übersprungen.");
+    return;
+  }
   await db.plan.upsert({
     where: { code: "BASIC" },
     update: {},

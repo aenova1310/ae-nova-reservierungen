@@ -28,6 +28,15 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 **Noch nicht enthalten (geplant):** Phase 2 – Anzahlung mit Stripe Connect (Datenmodell und Status
 `PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt).
 
+## Ausprobieren ohne Programmierkenntnisse
+
+1. [Docker Desktop](https://www.docker.com/products/docker-desktop/) installieren und starten.
+2. Dieses Projekt als ZIP herunterladen (GitHub → „Code“ → „Download ZIP“) und entpacken.
+3. **Windows:** `Lokal-starten.bat` doppelklicken. **Mac:** Terminal öffnen, in den Ordner wechseln,
+   `sh lokal-starten.sh` eingeben.
+4. Nach dem ersten Bauen (5–10 Minuten) öffnen sich Gäste-Buchung und Verwaltung im Browser
+   (`http://localhost:3000`). Zugänge stehen im Fenster. Beenden mit `Lokal-stoppen`.
+
 ## Schnellstart (lokal)
 
 Voraussetzungen: Node.js 22, PostgreSQL 16 (lokal oder per `docker compose up -d db`).
@@ -135,6 +144,9 @@ Alle Jobs sind HTTP-Endpunkte, abgesichert mit `Authorization: Bearer $CRON_SECR
 Im Docker-Compose-Setup übernimmt der Dienst `cron` (`docker/cron.sh`) die Aufrufe.
 
 ## Deployment (EU)
+
+**Schnellster Weg – Test-Server mit einem Befehl:** siehe [`deploy/README.md`](deploy/README.md)
+(Hetzner Cloud, Docker Compose, automatisches HTTPS mit Caddy, Demo-Daten, Update-Skript).
 
 Die App ist als Next.js-`standalone`-Build portabel. Empfohlen (siehe Architektur 3.13):
 
