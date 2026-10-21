@@ -44,6 +44,11 @@ export default async function RestaurantAdminLayout(props: LayoutProps<"/admin/[
         {user.name ?? user.email}
         <span className="block text-xs">{role === "OWNER" ? "Inhaber/in" : "Mitarbeiter/in"}</span>
       </p>
+      {user.platformRole === "SUPER_ADMIN" ? (
+        <Link href="/superadmin" className="block text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+          Zur Anbieter-Übersicht
+        </Link>
+      ) : null}
       <form action={logoutAction}>
         <button type="submit" className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
           Abmelden

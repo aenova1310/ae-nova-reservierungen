@@ -5,6 +5,8 @@ import { accessibleRestaurants, requireUser } from "@/server/tenancy/access";
 /** Einstieg: direkt zum (einzigen) Restaurant, sonst Auswahl. */
 export default async function AdminIndexPage() {
   const user = await requireUser();
+  // Anbieter landen in der Mandantenübersicht
+  if (user.platformRole === "SUPER_ADMIN") redirect("/superadmin");
   const restaurants = await accessibleRestaurants(user);
   if (restaurants.length === 1) redirect(`/admin/${restaurants[0].slug}`);
 
