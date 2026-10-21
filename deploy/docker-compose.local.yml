@@ -1,0 +1,65 @@
+# Lokale Vorschau mit Docker Desktop – ohne Server, ohne weitere Installation.
+# Start/Stopp per Skript im Hauptordner: „Lokal-starten“ / „Lokal-stoppen“.
+# Nur für den eigenen Rechner gedacht: feste Test-Geheimnisse, kein HTTPS, keine Mails.
+name: ae-nova-lokal
+
+x-env: &env
+  DATABASE_URL: postgresql://nova:nova@db:5432/nova
+  APP_URL: http://localhost:3000
+  APP_SECRET: lokal-nur-zum-testen-lokal-nur-zum-testen-1234567890
+  CRON_SECRET: lokal-cron-secret
+  SEED_IF_EMPTY: "1"
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: nova
+      POSTGRES_DB: nova
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nova"]
+      interval: 3s
+      retries: 30
+    restart: unless-stopped
+
+  # Datenbank einrichten und beim ersten Start die Demo-Daten anlegen
+  setup:
+    build: { context: .., target: migrate }
+    environment: *env
+    command: ["sh", "-c", "npx prisma migrate deploy && npx prisma db seed"]
+    depends_on:
+      db: { condition: service_healthy }
+
+  app:
+    build: { context: .., target: runner }
+    environment:
+      <<: *env
+      MEDIA_DRIVER: local
+      MEDIA_LOCAL_DIR: /app/.media
+    ports:
+      - "3000:3000"
+    volumes:
+      - media:/app/.media
+      - mail-outbox:/app/.mail-outbox
+    depends_on:
+      setup: { condition: service_completed_successfully }
+    restart: unless-stopped
+
+  cron:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "/jobs/cron.sh"]
+    environment:
+      TARGET: http://app:3000
+      CRON_SECRET: lokal-cron-secret
+    volumes:
+      - ../docker/cron.sh:/jobs/cron.sh:ro
+    depends_on: [app]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  media:
+  mail-outbox:
