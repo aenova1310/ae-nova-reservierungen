@@ -1,0 +1,96 @@
+# Test-/Produktionsbetrieb auf einem einzelnen Server (z. B. Hetzner Cloud).
+# Wird von deploy/install.sh und deploy/update.sh verwendet:
+#   docker compose -f deploy/docker-compose.yml --env-file deploy/.env …
+# Caddy holt automatisch ein HTTPS-Zertifikat (Let's Encrypt) für $DOMAIN.
+name: ae-nova
+
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: nova
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD fehlt}
+      POSTGRES_DB: nova
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U nova"]
+      interval: 5s
+      retries: 20
+    restart: unless-stopped
+    # bewusst ohne Port-Freigabe: nur im internen Netz erreichbar
+
+  # Einmal-Jobs: Migrationen und (optional) Demo-Daten
+  migrate:
+    build: { context: .., target: migrate }
+    environment: &dbenv
+      DATABASE_URL: postgresql://nova:${POSTGRES_PASSWORD}@db:5432/nova
+    depends_on:
+      db: { condition: service_healthy }
+    profiles: ["tools"]
+
+  seed:
+    build: { context: .., target: migrate }
+    environment:
+      <<: *dbenv
+      SEED_DEMO_PASSWORD: ${SEED_DEMO_PASSWORD}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD}
+      APP_SECRET: ${APP_SECRET}
+      CRON_SECRET: ${CRON_SECRET}
+      APP_URL: https://${DOMAIN}
+    command: ["npx", "prisma", "db", "seed"]
+    depends_on:
+      db: { condition: service_healthy }
+    profiles: ["tools"]
+
+  app:
+    build: { context: .., target: runner }
+    environment:
+      <<: *dbenv
+      APP_URL: https://${DOMAIN}
+      APP_SECRET: ${APP_SECRET}
+      CRON_SECRET: ${CRON_SECRET}
+      RESEND_API_KEY: ${RESEND_API_KEY:-}
+      EMAIL_FROM: ${EMAIL_FROM:-A&E NOVA Reservierungen <reservierung@localhost>}
+      MEDIA_DRIVER: local
+      MEDIA_LOCAL_DIR: /app/.media
+    volumes:
+      - media:/app/.media
+      # Nur ohne RESEND_API_KEY genutzt: Mails als Dateien (ansehen mit deploy/mails.sh)
+      - mail-outbox:/app/.mail-outbox
+    depends_on:
+      db: { condition: service_healthy }
+    restart: unless-stopped
+
+  cron:
+    image: curlimages/curl:8.11.1
+    entrypoint: ["/bin/sh", "/jobs/cron.sh"]
+    environment:
+      TARGET: http://app:3000
+      CRON_SECRET: ${CRON_SECRET}
+    volumes:
+      - ../docker/cron.sh:/jobs/cron.sh:ro
+    depends_on: [app]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2.10-alpine
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on: [app]
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  media:
+  mail-outbox:
+  caddy_data:
+  caddy_config:

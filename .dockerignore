@@ -7,3 +7,5 @@ node_modules
 src/generated
 tests
 *.log
+deploy/.env
+.media

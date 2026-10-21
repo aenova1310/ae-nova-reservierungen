@@ -28,7 +28,7 @@ ENV NODE_ENV=production \
     NEXT_TELEMETRY_DISABLED=1 \
     PORT=3000 \
     HOSTNAME=0.0.0.0
-RUN useradd --system --uid 1001 nova && mkdir -p /app/.media && chown nova /app/.media
+RUN useradd --system --uid 1001 nova && mkdir -p /app/.media /app/.mail-outbox && chown nova /app/.media /app/.mail-outbox
 COPY --from=build --chown=nova /app/.next/standalone ./
 COPY --from=build --chown=nova /app/.next/static ./.next/static
 COPY --from=build --chown=nova /app/public ./public

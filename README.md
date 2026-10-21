@@ -136,6 +136,9 @@ Im Docker-Compose-Setup übernimmt der Dienst `cron` (`docker/cron.sh`) die Aufr
 
 ## Deployment (EU)
 
+**Schnellster Weg – Test-Server mit einem Befehl:** siehe [`deploy/README.md`](deploy/README.md)
+(Hetzner Cloud, Docker Compose, automatisches HTTPS mit Caddy, Demo-Daten, Update-Skript).
+
 Die App ist als Next.js-`standalone`-Build portabel. Empfohlen (siehe Architektur 3.13):
 
 ### Option A – Hetzner Cloud + Coolify (rein europäisch)
