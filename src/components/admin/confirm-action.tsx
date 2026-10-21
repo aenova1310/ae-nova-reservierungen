@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import type { ActionResult } from "@/lib/action-result";
+import { useAdminT } from "./i18n-provider";
 
 /** Aktion mit Rückfrage (z. B. Löschen). Ohne `confirm` wird direkt ausgeführt. */
 export function ConfirmAction({
@@ -12,7 +13,7 @@ export function ConfirmAction({
   children,
   title,
   description,
-  confirmLabel = "Bestätigen",
+  confirmLabel,
   variant = "ghost",
   size = "sm",
   destructive = false,
@@ -26,6 +27,7 @@ export function ConfirmAction({
   size?: "sm" | "default" | "icon-sm";
   destructive?: boolean;
 }) {
+  const { t } = useAdminT();
   const [open, setOpen] = useState(false);
   const [pending, start] = useTransition();
   const run = () =>
@@ -56,10 +58,10 @@ export function ConfirmAction({
         {description ? <DialogDescription>{description}</DialogDescription> : null}
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>
-            Abbrechen
+            {t("common.cancel")}
           </Button>
           <Button variant={destructive ? "destructive" : "default"} disabled={pending} onClick={run}>
-            {confirmLabel}
+            {confirmLabel ?? t("common.confirm")}
           </Button>
         </DialogFooter>
       </DialogContent>

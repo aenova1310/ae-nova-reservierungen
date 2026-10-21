@@ -5,13 +5,15 @@ import { useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { AdminNav, type NavItem } from "./admin-nav";
+import { useAdminT } from "./i18n-provider";
 
 export function MobileNav({ base, items, title, footer }: { base: string; items: NavItem[]; title: string; footer: ReactNode }) {
+  const { t } = useAdminT();
   const [open, setOpen] = useState(false);
   return (
     <Sheet open={open} onOpenChange={setOpen}>
       <SheetTrigger asChild>
-        <Button variant="ghost" size="icon" aria-label="Menü öffnen">
+        <Button variant="ghost" size="icon" aria-label={t("nav.menu")}>
           <Menu className="size-5" />
         </Button>
       </SheetTrigger>

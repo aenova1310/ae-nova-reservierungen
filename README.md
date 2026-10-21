@@ -17,6 +17,7 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | Einbindung | `<script>` (Button mit Dialog oder inline) und `<iframe>` mit automatischer Höhe; Code-Generator mit Live-Vorschau |
 | Admin | Heute-Übersicht, Reservierungsliste (Filter, Suche, Status), Detail mit Verlauf, Umbuchen, Storno, Telefon-/Walk-in-Erfassung, Tagesplan pro Tisch, Tische/Bereiche/Kombinationen, Öffnungszeiten/Schichten/Ruhetage/Sonderschließungen, Verweildauer, Puffer, Slot-Raster, Online-Kontingent, Bestätigungsmodus, Branding, Datenschutztext, Team |
 | Zugänge | Mitarbeiter per E-Mail einladen (Link 7 Tage gültig, Passwort legt die Person selbst fest; erneut senden/zurückziehen); „Passwort vergessen“ mit Einmal-Link (1 Stunde), danach sind alle anderen Sitzungen abgemeldet. Links sind nur als Hash gespeichert |
+| Sprachen | Widget und Gäste-Mails Deutsch/Englisch; Verwaltung Deutsch/Englisch je Benutzer (Umschalter in der Seitenleiste und auf der Anmeldeseite), Konto-Mails in der Sprache des Benutzers |
 | Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
 | Super-Admin | `/superadmin`: Mandantenübersicht mit Buchungsvolumen und Monatsumsatz, Restaurant inkl. Inhaber-Zugang anlegen, sperren/freischalten, Tarif wechseln, Preise pflegen |
 | Medien | Logo (alle Tarife) und Tischansicht „So sitzen Sie“ (Pro): Foto mit Vergrößern (Browser-Vollbild, auch im iframe) oder interaktives 360°-Panorama (Photo Sphere Viewer, lokal gebündelt, erst bei Bedarf geladen). Upload mit Ziehen & Ablegen; Bilder werden serverseitig gedreht, verkleinert, in WebP/PNG umgewandelt und von **allen Metadaten (GPS, Kamera)** befreit; SVG wird abgelehnt |
@@ -25,7 +26,7 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
 
 **Noch nicht enthalten (geplant):** Phase 2 – Anzahlung mit Stripe Connect (Datenmodell und Status
-`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt). Phase 3 – englischer Admin.
+`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt).
 
 ## Schnellstart (lokal)
 

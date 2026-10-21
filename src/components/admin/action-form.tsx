@@ -5,6 +5,7 @@ import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import type { ActionResult } from "@/lib/action-result";
 import { cn } from "@/lib/utils";
+import { useAdminT } from "./i18n-provider";
 
 type Action = (state: ActionResult, formData: FormData) => Promise<ActionResult>;
 
@@ -32,12 +33,13 @@ export function ActionForm({
   onSuccess?: () => void;
 }) {
   const [state, formAction, pending] = useActionState(action, null);
+  const { t } = useAdminT();
   const formRef = useRef<HTMLFormElement>(null);
 
   useEffect(() => {
     if (!state) return;
     if (state.ok) {
-      toast.success(state.message ?? "Gespeichert.");
+      toast.success(state.message ?? t("common.saved"));
       if (resetOnSuccess) formRef.current?.reset();
       onSuccess?.();
     } else {

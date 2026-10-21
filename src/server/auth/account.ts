@@ -1,4 +1,6 @@
 import "server-only";
+import { ADMIN_MESSAGES, createAdminT, msg } from "@/i18n/admin";
+import type { Locale } from "@/i18n/messages";
 import { hashToken, randomToken } from "../crypto";
 import { db } from "../db";
 import { env } from "../env";
@@ -11,6 +13,7 @@ import { rateLimit } from "./rate-limit";
 
 /**
  * Konten: "Passwort vergessen" und Einladungen für Mitarbeiter.
+ * Fehlermeldungen sind Übersetzungsschlüssel (`msg(…)`), übersetzt in der Action.
  *
  * Beide nutzen Einmal-Links: In der Datenbank liegt nur der SHA-256-Hash des
  * Tokens, der Klartext steht ausschließlich in der E-Mail. Diese Mails laufen
@@ -30,7 +33,7 @@ export const INVITATION_TTL_DAYS = 7;
 export const INVITE_LIMITS = { perOrgPerHour: 20, perRecipientPerDay: 5, maxOpen: 25 } as const;
 
 type Role = "OWNER" | "STAFF";
-const roleLabel = (role: Role) => (role === "OWNER" ? "Inhaber/in" : "Mitarbeiter/in");
+const translator = (locale: Locale) => createAdminT(ADMIN_MESSAGES[locale]);
 const link = (path: string, token: string) => {
   const url = new URL(path, env().APP_URL);
   url.searchParams.set("token", token);
@@ -41,9 +44,10 @@ async function sendAccountMail(
   type: "PASSWORD_RESET" | "STAFF_INVITATION",
   to: string,
   layout: Omit<MailLayoutInput, "lang" | "brandColor" | "footer">,
+  locale: Locale,
   restaurantId: string | null = null,
 ) {
-  const full: MailLayoutInput = { ...layout, lang: "de", brandColor: "#1d2433", footer: "A&E NOVA Reservierungen" };
+  const full: MailLayoutInput = { ...layout, lang: locale, brandColor: "#1d2433", footer: "A&E NOVA Reservierungen" };
   try {
     const result = await emailProvider().send({ to, subject: layout.heading, html: renderMailHtml(full), text: renderMailText(full) });
     // "direct:" – der Nachversand-Job fasst diese Einträge nicht an (Token ist nicht rekonstruierbar)
@@ -52,7 +56,7 @@ async function sendAccountMail(
     await db.emailLog.create({
       data: { type, restaurantId, status: "FAILED", providerMessageId: "direct", error: String(error instanceof Error ? error.message : error).slice(0, 500) },
     });
-    throw new AccountError("Die E-Mail konnte nicht gesendet werden. Bitte später erneut versuchen.");
+    throw new AccountError(msg("account.err.mailFailed"));
   }
 }
 
@@ -73,16 +77,20 @@ export async function requestPasswordReset(email: string): Promise<void> {
       data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_TTL_MINUTES * 60_000) },
     }),
   ]);
-  await sendAccountMail("PASSWORD_RESET", user.email, {
-    restaurantName: "A&E NOVA Reservierungen",
-    heading: "Neues Passwort festlegen",
-    greeting: `Guten Tag${user.name ? ` ${user.name}` : ""},`,
-    paragraphs: [
-      `für Ihr Konto wurde ein neues Passwort angefordert. Der Link ist ${RESET_TTL_MINUTES} Minuten gültig und kann einmal verwendet werden.`,
-      "Falls Sie das nicht waren, ignorieren Sie diese E-Mail – Ihr Passwort bleibt unverändert.",
-    ],
-    cta: { label: "Passwort festlegen", url: link("/admin/passwort-neu", token) },
-  });
+  const locale = user.locale === "en" ? "en" : "de";
+  const t = translator(locale);
+  await sendAccountMail(
+    "PASSWORD_RESET",
+    user.email,
+    {
+      restaurantName: "A&E NOVA Reservierungen",
+      heading: t("account.mail.reset.heading"),
+      greeting: t("account.mail.reset.greeting", { name: user.name ? ` ${user.name}` : "" }),
+      paragraphs: [t("account.mail.reset.p1", { minutes: RESET_TTL_MINUTES }), t("account.mail.reset.p2")],
+      cta: { label: t("account.mail.reset.cta"), url: link("/admin/passwort-neu", token) },
+    },
+    locale,
+  );
 }
 
 async function findResetToken(token: string) {
@@ -103,7 +111,7 @@ export async function resetTokenEmail(token: string): Promise<string | null> {
 /** Setzt das Passwort, entwertet den Link und meldet alle Sitzungen ab. Liefert die User-ID. */
 export async function resetPassword(token: string, password: string): Promise<string> {
   const row = await findResetToken(token);
-  if (!row) throw new AccountError("Der Link ist ungültig oder abgelaufen. Bitte fordern Sie einen neuen an.");
+  if (!row) throw new AccountError(msg("account.err.resetInvalid"));
   const passwordHash = await hashPassword(password);
   await db.$transaction(async (tx) => {
     // Atomar einlösen: zwei gleichzeitige Anfragen mit demselben Link → nur eine gewinnt
@@ -111,7 +119,7 @@ export async function resetPassword(token: string, password: string): Promise<st
       where: { id: row.id, usedAt: null, expiresAt: { gt: new Date() } },
       data: { usedAt: new Date() },
     });
-    if (used.count !== 1) throw new AccountError("Der Link wurde bereits verwendet.");
+    if (used.count !== 1) throw new AccountError(msg("account.err.resetUsed"));
     await tx.user.update({ where: { id: row.userId }, data: { passwordHash } });
     await tx.session.deleteMany({ where: { userId: row.userId } });
     await tx.passwordResetToken.deleteMany({ where: { userId: row.userId, usedAt: null } });
@@ -127,6 +135,8 @@ interface InviteContext {
   restaurantName: string;
   planCode: PlanCode;
   invitedByName: string;
+  /** Sprache der Einladungs-Mail (die der einladenden Person). */
+  locale: Locale;
 }
 
 const openInvitations = (organizationId: string) => ({ organizationId, acceptedAt: null, expiresAt: { gt: new Date() } });
@@ -138,24 +148,26 @@ async function assertSeat(ctx: InviteContext, excludeEmail?: string) {
     db.invitation.count({ where: { ...openInvitations(ctx.organizationId), NOT: excludeEmail ? { email: excludeEmail } : undefined } }),
   ]);
   if (members + invites >= maxMembers(ctx.planCode)) {
-    throw new AccountError("Im Basic-Tarif ist ein Admin-Zugang enthalten. Für weitere Mitarbeiter-Zugänge bitte auf Pro wechseln.");
+    throw new AccountError(msg("account.err.basicLimit"));
   }
 }
 
 async function mailInvitation(ctx: InviteContext, email: string, role: Role, token: string) {
+  const t = translator(ctx.locale);
   await sendAccountMail(
     "STAFF_INVITATION",
     email,
     {
       restaurantName: ctx.restaurantName,
-      heading: `Einladung: ${ctx.restaurantName}`,
-      greeting: "Guten Tag,",
+      heading: t("account.mail.invite.heading", { restaurant: ctx.restaurantName }),
+      greeting: t("account.mail.invite.greeting"),
       paragraphs: [
-        `${ctx.invitedByName} lädt Sie als ${roleLabel(role)} in die Reservierungsverwaltung von ${ctx.restaurantName} ein.`,
-        `Über den Link legen Sie Ihr Passwort fest. Er ist ${INVITATION_TTL_DAYS} Tage gültig.`,
+        t("account.mail.invite.p1", { inviter: ctx.invitedByName, role: t(`common.role.${role}`), restaurant: ctx.restaurantName }),
+        t("account.mail.invite.p2", { days: INVITATION_TTL_DAYS }),
       ],
-      cta: { label: "Einladung annehmen", url: link("/admin/einladung", token) },
+      cta: { label: t("account.mail.invite.cta"), url: link("/admin/einladung", token) },
     },
+    ctx.locale,
     ctx.restaurantId,
   );
 }
@@ -165,16 +177,16 @@ export async function inviteMember(ctx: InviteContext, rawEmail: string, role: R
   const email = rawEmail.trim().toLowerCase();
   const user = await db.user.findUnique({ where: { email }, select: { id: true } });
   if (user && (await db.membership.findUnique({ where: { userId_organizationId: { userId: user.id, organizationId: ctx.organizationId } } }))) {
-    throw new AccountError("Diese Person hat bereits Zugang.");
+    throw new AccountError(msg("account.err.alreadyMember"));
   }
   await assertSeat(ctx, email);
   const open = await db.invitation.count({ where: { ...openInvitations(ctx.organizationId), NOT: { email } } });
-  if (open >= INVITE_LIMITS.maxOpen) throw new AccountError(`Es sind bereits ${open} Einladungen offen. Bitte ziehen Sie nicht mehr benötigte zurück.`);
+  if (open >= INVITE_LIMITS.maxOpen) throw new AccountError(msg("account.err.tooManyOpen", { count: open }));
   if (
     !rateLimit(`invite-org:${ctx.organizationId}`, INVITE_LIMITS.perOrgPerHour, 3_600_000).ok ||
     !rateLimit(`invite-to:${hashToken(email)}`, INVITE_LIMITS.perRecipientPerDay, 86_400_000).ok
   ) {
-    throw new AccountError("Zu viele Einladungen in kurzer Zeit. Bitte später erneut versuchen.");
+    throw new AccountError(msg("account.err.tooManyInvites"));
   }
 
   const token = randomToken();
@@ -195,7 +207,7 @@ export async function inviteMember(ctx: InviteContext, rawEmail: string, role: R
 /** Neuer Link für eine offene oder abgelaufene Einladung (alter Link wird ungültig). */
 export async function resendInvitation(ctx: InviteContext, invitationId: string): Promise<string> {
   const inv = await db.invitation.findFirst({ where: { id: invitationId, organizationId: ctx.organizationId, acceptedAt: null } });
-  if (!inv) throw new AccountError("Einladung nicht gefunden.");
+  if (!inv) throw new AccountError(msg("account.err.inviteNotFound"));
   await inviteMember(ctx, inv.email, inv.role);
   return inv.email;
 }
@@ -242,19 +254,19 @@ export async function invitationView(token: string): Promise<InvitationView | nu
  */
 export async function acceptInvitation(token: string, input: { name?: string; password: string }): Promise<{ userId: string; slug: string | null }> {
   const inv = await findInvitation(token);
-  if (!inv) throw new AccountError("Die Einladung ist ungültig oder abgelaufen. Bitte lassen Sie sich neu einladen.");
+  if (!inv) throw new AccountError(msg("account.err.inviteInvalid"));
   const existing = await db.user.findUnique({ where: { email: inv.email } });
   if (existing) {
     // Passwortprüfung → wie beim Login begrenzen
-    if (!rateLimit(`invite-accept:${inv.id}`, 8, 15 * 60_000).ok) throw new AccountError("Zu viele Versuche. Bitte später erneut versuchen.");
+    if (!rateLimit(`invite-accept:${inv.id}`, 8, 15 * 60_000).ok) throw new AccountError(msg("account.err.tooManyAttempts"));
     if (await db.membership.findUnique({ where: { userId_organizationId: { userId: existing.id, organizationId: inv.organizationId } } })) {
-      throw new AccountError("Sie haben bereits Zugang zu diesem Betrieb. Bitte melden Sie sich an.");
+      throw new AccountError(msg("account.err.alreadyHasAccess"));
     }
     if (existing.disabledAt || !(await verifyPassword(existing.passwordHash, input.password))) {
-      throw new AccountError("Das Passwort ist nicht korrekt.");
+      throw new AccountError(msg("account.err.wrongPassword"));
     }
   } else if (!input.name?.trim()) {
-    throw new AccountError("Bitte geben Sie Ihren Namen an.");
+    throw new AccountError(msg("account.err.nameMissing"));
   }
   const passwordHash = existing ? null : await hashPassword(input.password);
 
@@ -265,14 +277,14 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
         where: { id: inv.id, acceptedAt: null, expiresAt: { gt: new Date() } },
         data: { acceptedAt: new Date() },
       });
-      if (claimed.count !== 1) throw new AccountError("Die Einladung wurde bereits angenommen.");
+      if (claimed.count !== 1) throw new AccountError(msg("account.err.inviteUsed"));
       // Tarif erneut prüfen (z. B. Wechsel auf Basic nach dem Einladen)
       const [members, restaurants] = await Promise.all([
         tx.membership.count({ where: { organizationId: inv.organizationId } }),
         tx.restaurant.findMany({ where: { organizationId: inv.organizationId }, select: { planCode: true } }),
       ]);
       const seats = Math.max(0, ...restaurants.map((r) => maxMembers(r.planCode)));
-      if (members >= seats) throw new AccountError("Der Tarif des Restaurants erlaubt derzeit keine weiteren Zugänge. Bitte wenden Sie sich an das Restaurant.");
+      if (members >= seats) throw new AccountError(msg("account.err.planFull"));
       const user =
         existing ??
         (await tx.user.create({ data: { email: inv.email, name: input.name!.trim().slice(0, 80), passwordHash: passwordHash!, emailVerified: new Date() } }));
@@ -282,7 +294,7 @@ export async function acceptInvitation(token: string, input: { name?: string; pa
   } catch (error) {
     // Gleichzeitiges Annehmen (gleiche Adresse/zweite Einladung) → verständliche Meldung statt Serverfehler
     if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
-      throw new AccountError("Für diese Adresse wurde gerade schon ein Zugang angelegt. Bitte melden Sie sich an.");
+      throw new AccountError(msg("account.err.justCreated"));
     }
     throw error;
   }

@@ -4,7 +4,9 @@ import { PageHeader, Section } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { dateFormat } from "@/i18n/admin/format";
 import { db } from "@/server/db";
+import { getAdminT } from "@/server/i18n";
 import { maxMembers } from "@/server/plans/features";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 import { inviteMemberAction, removeMemberAction, resendInvitationAction, revokeInvitationAction } from "./actions";
@@ -12,6 +14,7 @@ import { inviteMemberAction, removeMemberAction, resendInvitationAction, revokeI
 export default async function TeamPage(props: PageProps<"/admin/[restaurant]/team">) {
   const { restaurant: slug } = await props.params;
   const { restaurant, user } = await requireRestaurantAccess(slug, { ownerOnly: true });
+  const { t, locale } = await getAdminT();
   const members = await db.membership.findMany({
     where: { organizationId: restaurant.organizationId },
     include: { user: { select: { id: true, name: true, email: true, lastLoginAt: true } } },
@@ -25,33 +28,33 @@ export default async function TeamPage(props: PageProps<"/admin/[restaurant]/tea
   const openInvites = invitations.filter((i) => i.expiresAt > now).length;
   const limit = maxMembers(restaurant.planCode);
   const canAdd = members.length + openInvites < limit;
-  const dt = new Intl.DateTimeFormat("de-DE", { dateStyle: "medium", timeZone: restaurant.timezone });
+  const dt = dateFormat(locale, { dateStyle: "medium", timeZone: restaurant.timezone });
 
   return (
     <>
       <PageHeader
-        title="Team"
-        description={Number.isFinite(limit) ? `${members.length} von ${limit} Zugang im Basic-Tarif` : "Unbegrenzte Mitarbeiter-Zugänge (Pro)"}
+        title={t("team.title")}
+        description={Number.isFinite(limit) ? t("team.limit", { count: members.length, limit }) : t("team.unlimited")}
       />
       <div className="space-y-6">
-        <Section title="Zugänge">
+        <Section title={t("team.members")}>
           <ul className="divide-y text-sm">
             {members.map((m) => (
               <li key={m.id} className="flex flex-wrap items-center gap-3 py-2.5">
                 <span className="font-medium">{m.user.name ?? m.user.email}</span>
                 <span className="text-muted-foreground">{m.user.email}</span>
-                <Badge variant="secondary">{m.role === "OWNER" ? "Inhaber/in" : "Mitarbeiter/in"}</Badge>
+                <Badge variant="secondary">{t(`common.role.${m.role}`)}</Badge>
                 <span className="ml-auto text-xs text-muted-foreground">
-                  {m.user.lastLoginAt ? `Zuletzt angemeldet ${dt.format(m.user.lastLoginAt)}` : "Noch nicht angemeldet"}
+                  {m.user.lastLoginAt ? t("team.lastLogin", { date: dt.format(m.user.lastLoginAt) }) : t("team.neverLoggedIn")}
                 </span>
                 {m.user.id !== user.id ? (
                   <ConfirmAction
                     action={removeMemberAction.bind(null, slug, m.id)}
-                    title={`Zugang für ${m.user.email} entfernen?`}
-                    confirmLabel="Entfernen"
+                    title={t("team.removeTitle", { email: m.user.email })}
+                    confirmLabel={t("common.remove")}
                     destructive
                   >
-                    Entfernen
+                    {t("common.remove")}
                   </ConfirmAction>
                 ) : null}
               </li>
@@ -60,22 +63,22 @@ export default async function TeamPage(props: PageProps<"/admin/[restaurant]/tea
         </Section>
 
         {invitations.length > 0 ? (
-          <Section title="Offene Einladungen">
+          <Section title={t("team.invitations")}>
             <ul className="divide-y text-sm">
               {invitations.map((inv) => {
                 const expired = inv.expiresAt <= now;
                 return (
                   <li key={inv.id} className="flex flex-wrap items-center gap-3 py-2.5">
                     <span className="font-medium">{inv.email}</span>
-                    <Badge variant="secondary">{inv.role === "OWNER" ? "Inhaber/in" : "Mitarbeiter/in"}</Badge>
+                    <Badge variant="secondary">{t(`common.role.${inv.role}`)}</Badge>
                     <span className={expired ? "ml-auto text-xs text-destructive" : "ml-auto text-xs text-muted-foreground"}>
-                      {expired ? `Abgelaufen am ${dt.format(inv.expiresAt)}` : `Gültig bis ${dt.format(inv.expiresAt)}`}
+                      {expired ? t("team.expiredOn", { date: dt.format(inv.expiresAt) }) : t("team.validUntil", { date: dt.format(inv.expiresAt) })}
                     </span>
-                    <ConfirmAction action={resendInvitationAction.bind(null, slug, inv.id)} title={`Einladung an ${inv.email} erneut senden?`} description="Der bisherige Link wird ungültig." confirmLabel="Senden">
-                      Erneut senden
+                    <ConfirmAction action={resendInvitationAction.bind(null, slug, inv.id)} title={t("team.resendTitle", { email: inv.email })} description={t("team.resendDescription")} confirmLabel={t("team.send")}>
+                      {t("team.resend")}
                     </ConfirmAction>
-                    <ConfirmAction action={revokeInvitationAction.bind(null, slug, inv.id)} title={`Einladung an ${inv.email} zurückziehen?`} confirmLabel="Zurückziehen" destructive>
-                      Zurückziehen
+                    <ConfirmAction action={revokeInvitationAction.bind(null, slug, inv.id)} title={t("team.revokeTitle", { email: inv.email })} confirmLabel={t("team.revoke")} destructive>
+                      {t("team.revoke")}
                     </ConfirmAction>
                   </li>
                 );
@@ -85,32 +88,32 @@ export default async function TeamPage(props: PageProps<"/admin/[restaurant]/tea
         ) : null}
 
         <Section
-          title="Person einladen"
+          title={t("team.invite.title")}
           description={canAdd
-              ? "Die Person erhält eine E-Mail mit einem Link (7 Tage gültig) und legt ihr Passwort selbst fest. Mitarbeiter sehen Reservierungen, Tagesplan, Tische und Öffnungszeiten – keine Einstellungen, kein Team, keinen Datenschutz-Bereich."
+              ? t("team.invite.description")
               : undefined}
         >
           {canAdd ? (
             <ActionForm action={inviteMemberAction.bind(null, slug)} resetOnSuccess className="grid gap-4 sm:grid-cols-[1fr_12rem_auto] sm:items-end">
               <div className="space-y-1.5">
-                <Label htmlFor="t-email">E-Mail</Label>
+                <Label htmlFor="t-email">{t("team.invite.email")}</Label>
                 <Input id="t-email" name="email" type="email" required autoComplete="off" />
                 <FieldError name="email" />
               </div>
               <div className="space-y-1.5">
-                <Label htmlFor="t-role">Rolle</Label>
+                <Label htmlFor="t-role">{t("team.invite.role")}</Label>
                 <select id="t-role" name="role" className="h-8 w-full rounded-md border border-input bg-background px-3 text-sm">
-                  <option value="STAFF">Mitarbeiter/in</option>
-                  <option value="OWNER">Inhaber/in</option>
+                  <option value="STAFF">{t("common.role.STAFF")}</option>
+                  <option value="OWNER">{t("common.role.OWNER")}</option>
                 </select>
               </div>
-              <SubmitButton>Einladung senden</SubmitButton>
+              <SubmitButton>{t("team.invite.submit")}</SubmitButton>
             </ActionForm>
           ) : (
             <p className="text-sm text-muted-foreground">
               {members.length < limit
-                ? "Es ist bereits eine Einladung offen. Im Basic-Tarif ist ein Admin-Zugang enthalten – ziehen Sie die Einladung zurück oder wechseln Sie auf Pro."
-                : "Im Basic-Tarif ist ein Admin-Zugang enthalten. Mit Pro erhalten Sie unbegrenzte Mitarbeiter-Zugänge."}
+                ? t("team.invite.pending")
+                : t("team.invite.basic")}
             </p>
           )}
         </Section>
