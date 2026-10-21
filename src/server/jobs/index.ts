@@ -1,6 +1,7 @@
 import "server-only";
 import { db } from "../db";
 import { retryPendingEmails } from "../email/outbox";
+import { sendReminders } from "../email/reminders";
 import { runAnonymization } from "../privacy/anonymize";
 import { expireStaleHolds, lockRestaurant } from "../reservations/create";
 
@@ -27,6 +28,8 @@ export const JOBS = {
   },
   /** Alle 5 Minuten: wartende/fehlgeschlagene E-Mails erneut senden. */
   "send-emails": () => retryPendingEmails(),
+  /** Alle 15 Minuten: Erinnerungs-Mails vor dem Besuch. */
+  "send-reminders": () => sendReminders(),
   /** Täglich: Gastdaten nach Ablauf der Frist anonymisieren. */
   anonymize: () => runAnonymization(),
   /** Täglich: abgelaufene Sessions und Reset-Tokens löschen. */

@@ -7,6 +7,7 @@ minute=0
 while true; do
   call expire-holds
   [ $((minute % 5)) -eq 0 ] && call send-emails
+  [ $((minute % 15)) -eq 0 ] && call send-reminders
   # täglich gegen 03:00 UTC Anonymisierung und Aufräumen
   if [ "$(date -u +%H%M)" = "0300" ]; then call anonymize; call cleanup; fi
   minute=$((minute + 1))

@@ -591,5 +591,5 @@ Resend (ohne API-Schlüssel nur Datei-Outbox).
 
 **Vorbereitet, aber noch ohne Funktion** (bewusst, Phase 2/3): Renderer für Video/3D in der
 `TableViewPreview`-Registry, Status `PENDING_PAYMENT`/Job `expire-holds` (ohne Stripe-Fluss),
-`RESERVATION_REMINDER`/`reminderSentAt` (ohne Job), `StatsDaily` (Kennzahlen kommen in Phase 2),
+`StatsDaily` (Kennzahlen kommen in Phase 2),
 `PasswordResetToken`/`Invitation` (Mitarbeiter werden im MVP mit Startpasswort angelegt).

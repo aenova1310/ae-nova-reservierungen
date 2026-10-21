@@ -6,6 +6,7 @@ import type { ActionResult } from "@/lib/action-result";
 import { contrastRatio, isHexColor } from "@/lib/color";
 import { WIDGET_FONTS } from "@/lib/fonts";
 import { db } from "@/server/db";
+import { REMINDER_HOURS_OPTIONS } from "@/server/email/reminders";
 import { formObject, runAction } from "@/server/http/admin-action";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 
@@ -37,6 +38,24 @@ export async function saveBookingRulesAction(slug: string, _prev: ActionResult, 
     await tdb.restaurantSettings.update({ where: { restaurantId: restaurant.id }, data });
     refresh(slug);
     return "Buchungsregeln gespeichert.";
+  });
+}
+
+const reminderSchema = z.object({
+  reminder: z.enum(["off", ...REMINDER_HOURS_OPTIONS.map(String)] as [string, ...string[]]),
+});
+
+export async function saveReminderAction(slug: string, _prev: ActionResult, formData: FormData) {
+  return runAction(async () => {
+    const { tdb, restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
+    const { reminder } = reminderSchema.parse(formObject(formData));
+    await tdb.restaurantSettings.update({
+      where: { restaurantId: restaurant.id },
+      // Bei "aus" bleibt die zuletzt gewählte Vorlaufzeit für späteres Einschalten erhalten
+      data: reminder === "off" ? { reminderEnabled: false } : { reminderEnabled: true, reminderHoursBefore: Number(reminder) },
+    });
+    refresh(slug);
+    return reminder === "off" ? "Erinnerungen ausgeschaltet." : `Erinnerung ${reminder} Stunden vor dem Besuch.`;
   });
 }
 
