@@ -1,5 +1,5 @@
 /** Reservierte Slugs, die mit Routen oder Systembegriffen kollidieren würden. */
-const RESERVED_SLUGS = new Set(["admin", "api", "embed", "r", "superadmin", "login", "app", "www", "static", "_next"]);
+const RESERVED_SLUGS = new Set(["admin", "api", "embed", "r", "superadmin", "login", "passwort-vergessen", "passwort-neu", "einladung", "app", "www", "static", "_next"]);
 
 /**
  * "Osteria Lumière & Söhne" → "osteria-lumiere-soehne".

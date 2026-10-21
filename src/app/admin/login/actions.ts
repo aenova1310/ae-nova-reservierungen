@@ -8,6 +8,7 @@ import { verifyPassword } from "@/server/auth/password";
 import { rateLimit } from "@/server/auth/rate-limit";
 import { createSession, destroySession } from "@/server/auth/session";
 import { hashToken } from "@/server/crypto";
+import { clientIp } from "@/server/http/request";
 import type { ActionResult } from "@/lib/action-result";
 
 const schema = z.object({ email: z.string().trim().toLowerCase().email(), password: z.string().min(1) });
@@ -20,7 +21,7 @@ export async function loginAction(_prev: ActionResult, formData: FormData): Prom
   if (!parsed.success) return { ok: false, error: "Bitte E-Mail und Passwort eingeben." };
 
   const h = await headers();
-  const ip = h.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "local";
+  const ip = clientIp(h);
   const limit = rateLimit(`login:${hashToken(`${ip}:${parsed.data.email}`)}`, 8, 15 * 60_000);
   if (!limit.ok) return { ok: false, error: "Zu viele Anmeldeversuche. Bitte in einigen Minuten erneut versuchen." };
 
