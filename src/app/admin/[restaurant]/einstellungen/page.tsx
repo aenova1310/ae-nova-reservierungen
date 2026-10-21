@@ -1,4 +1,6 @@
 import { ActionForm, FieldError, SubmitButton } from "@/components/admin/action-form";
+import { LogoSettings } from "@/components/admin/logo-settings";
+import { logoView } from "@/server/media/service";
 import { PageHeader, Section } from "@/components/admin/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -65,6 +67,14 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
           </ActionForm>
         </Section>
 
+        <Section title="Logo" description="Erscheint im Kopf des Widgets anstelle des Restaurantnamens.">
+          <LogoSettings
+            slug={slug}
+            restaurantName={full.name}
+            logo={logoView(b)}
+          />
+        </Section>
+
         <Section
           title="Erscheinungsbild des Widgets"
           description={hasFeature(full.planCode, "removePoweredBy") ? "Pro: ohne „powered by“-Hinweis." : "Im Basic-Tarif steht ein dezenter „powered by“-Hinweis im Widget."}
@@ -95,9 +105,7 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
                 <option value="round">Rund</option>
               </select>
             </Field>
-            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-4">
-              Logo-Upload folgt mit dem Medien-Speicher in Phase 2. Vorschau unter „Website-Einbindung“.
-            </p>
+            <p className="text-sm text-muted-foreground sm:col-span-2 lg:col-span-4">Vorschau unter „Website-Einbindung“.</p>
             <div className="sm:col-span-2 lg:col-span-4">
               <SubmitButton>Erscheinungsbild speichern</SubmitButton>
             </div>

@@ -17,10 +17,12 @@ export async function createRestaurant(
   tables: { name: string; min: number; max: number }[] = [{ name: "T1", min: 1, max: 2 }],
   settings: Partial<{ confirmationMode: "AUTOMATIC" | "MANUAL"; allocationMode: "AUTOMATIC" | "GUEST_CHOOSES_TABLE" }> = {},
 ) {
-  await db.plan.upsert({
-    where: { code: "BASIC" },
-    update: {},
-    create: { code: "BASIC", name: "Basic", priceMonthlyCents: 3900 },
+  await db.plan.createMany({
+    data: [
+      { code: "BASIC", name: "Basic", priceMonthlyCents: 3900 },
+      { code: "PRO", name: "Pro", priceMonthlyCents: 7900 },
+    ],
+    skipDuplicates: true,
   });
   const org = await db.organization.create({ data: { name: `Org ${slug}` } });
   const restaurant = await db.restaurant.create({

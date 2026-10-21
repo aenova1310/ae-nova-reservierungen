@@ -5,6 +5,9 @@ import { PageHeader, Section } from "@/components/admin/page-header";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { TableMediaDialog } from "@/components/admin/table-media-dialog";
+import { toMediaView, type TableMediaView } from "@/server/media/service";
+import { hasFeature } from "@/server/plans/features";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 import {
   createCombinationAction,
@@ -22,11 +25,19 @@ const GRID = "grid grid-cols-[6rem_10rem_4.5rem_4.5rem_4rem_4rem_1fr] items-cent
 
 export default async function TablesPage(props: PageProps<"/admin/[restaurant]/tische">) {
   const { restaurant: slug } = await props.params;
-  const { tdb } = await requireRestaurantAccess(slug);
-  const [areas, combos] = await Promise.all([
+  const { tdb, restaurant } = await requireRestaurantAccess(slug);
+  const tableView = hasFeature(restaurant.planCode, "tableView");
+  const [areas, combos, mediaRows] = await Promise.all([
     tdb.area.findMany({ orderBy: { sortOrder: "asc" }, include: { tables: { orderBy: { sortOrder: "asc" } } } }),
     tdb.tableCombination.findMany({ orderBy: { name: "asc" }, include: { tables: { include: { table: { select: { name: true } } } } } }),
+    tableView ? tdb.tableMedia.findMany() : Promise.resolve([]),
   ]);
+  const mediaByTable = new Map<string, TableMediaView>(
+    mediaRows.flatMap((m) => {
+      const view = toMediaView(m);
+      return view ? [[m.tableId, view] as const] : [];
+    }),
+  );
   const allTables = areas.flatMap((a) => a.tables.filter((t) => t.active));
   const seats = allTables.reduce((s, t) => s + t.maxCapacity, 0);
 
@@ -36,6 +47,11 @@ export default async function TablesPage(props: PageProps<"/admin/[restaurant]/t
         title="Tische & Bereiche"
         description={`${allTables.length} aktive Tische · ${seats} Plätze · ${combos.length} Kombinationen`}
       />
+      {!tableView ? (
+        <p className="mb-6 rounded-md border bg-card px-4 py-3 text-sm text-muted-foreground">
+          Mit Pro können Sie pro Tisch ein Foto oder 360°-Panorama hinterlegen – Gäste sehen bei der Tischwahl, wie sie sitzen.
+        </p>
+      ) : null}
 
       <div className="space-y-6">
         {areas.map((area) => (
@@ -97,6 +113,7 @@ export default async function TablesPage(props: PageProps<"/admin/[restaurant]/t
                       <input type="checkbox" name="onlineBookable" defaultChecked={t.onlineBookable} aria-label="Online buchbar" className="size-4 justify-self-start" />
                       <input type="checkbox" name="active" defaultChecked={t.active} aria-label="Aktiv" className="size-4 justify-self-start" />
                       <div className="flex items-center justify-end gap-1">
+                        {tableView ? <TableMediaDialog slug={slug} table={{ id: t.id, name: t.name }} media={mediaByTable.get(t.id) ?? null} /> : null}
                         <SubmitButton variant="ghost" size="sm">Speichern</SubmitButton>
                         <ConfirmAction
                           action={deleteTableAction.bind(null, slug, t.id)}

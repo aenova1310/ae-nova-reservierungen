@@ -285,6 +285,8 @@ model RestaurantSettings {
 model Branding {
   restaurantId String    @id
   logoKey      String? // Objekt-Key im S3-kompatiblen EU-Speicher
+  logoWidth    Int?
+  logoHeight   Int?
   primaryColor String    @default("#6B1E2E") // Hex; Kontrast wird beim Speichern geprüft
   fontFamily   String    @default("serif-classic") // Schlüssel aus kuratierter Liste (keine beliebigen Google-Fonts-Requests)
   themeMode    ThemeMode @default(LIGHT)
@@ -408,6 +410,8 @@ model TableMedia {
   tableId      String         @unique
   kind         TableMediaKind
   storageKey   String
+  /// Kleine Vorschau (Tischliste, Lightbox-Platzhalter)
+  thumbKey     String?
   mimeType     String
   width        Int?
   height       Int?

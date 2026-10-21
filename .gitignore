@@ -43,3 +43,5 @@ next-env.d.ts
 !.env.example
 .mail-outbox/
 public/embed.js
+
+.media/

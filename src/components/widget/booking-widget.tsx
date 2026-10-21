@@ -236,7 +236,18 @@ export function BookingWidget({
     <div className={cn("mx-auto w-full max-w-[30rem]", embedded ? "px-4 py-5" : "px-5 py-8 sm:py-12")}>
       <header className="flex items-start justify-between gap-4">
         <div>
-          <p className="font-display text-2xl leading-tight sm:text-[1.75rem]">{restaurant.name}</p>
+          {restaurant.logo ? (
+            // eslint-disable-next-line @next/next/no-img-element -- Logo über /media, feste Abmessungen gegen Layoutsprünge
+            <img
+              src={restaurant.logo.url}
+              alt={restaurant.name}
+              width={restaurant.logo.width}
+              height={restaurant.logo.height}
+              className="h-auto max-h-14 w-auto max-w-[14rem] object-contain object-left"
+            />
+          ) : (
+            <p className="font-display text-2xl leading-tight sm:text-[1.75rem]">{restaurant.name}</p>
+          )}
           <p className="mt-1 text-sm text-muted-foreground">{t("widget.title")}</p>
         </div>
         <button
@@ -318,6 +329,7 @@ export function BookingWidget({
           <SeatStep
             restaurant={restaurant}
             slot={slot}
+            locale={locale}
             areaId={areaId}
             table={table}
             onArea={setAreaId}
@@ -502,6 +514,7 @@ function TimeStep({
 function SeatStep({
   restaurant,
   slot,
+  locale,
   areaId,
   table,
   onArea,
@@ -512,6 +525,7 @@ function SeatStep({
 }: {
   restaurant: WidgetRestaurant;
   slot: WidgetSlot;
+  locale: Locale;
   areaId: string | null;
   table: WidgetCandidate | null;
   onArea: (id: string | null) => void;
@@ -571,6 +585,11 @@ function SeatStep({
                       <span className="ml-2 text-sm text-muted-foreground">
                         {t("widget.table.seats", { min: c.minCapacity, max: c.maxCapacity })}
                       </span>
+                      {c.media ? (
+                        <span className="ml-2 rounded-sm border px-1.5 py-0.5 text-[0.7rem] text-muted-foreground">
+                          {c.media.kind === "PANORAMA_360" ? t("widget.table.has360") : t("widget.table.hasPhoto")}
+                        </span>
+                      ) : null}
                     </span>
                     <span
                       className={cn(
@@ -587,7 +606,27 @@ function SeatStep({
           {table ? (
             <div>
               <p className="mb-2 text-sm text-muted-foreground">{t("widget.table.preview")}</p>
-              <TableViewPreview media={null} label={`${t("widget.table.preview")} – ${table.name}`} emptyText={t("widget.table.noPreview")} />
+              <TableViewPreview
+                key={`${table.kind}-${table.id}`}
+                media={
+                  table.media
+                    ? {
+                        kind: table.media.kind,
+                        url: table.media.url,
+                        thumbUrl: table.media.thumbUrl,
+                        alt: locale === "en" ? table.media.altEn : table.media.altDe,
+                      }
+                    : null
+                }
+                emptyText={t("widget.table.noPreview")}
+                texts={{
+                  enlarge: t("widget.table.enlarge"),
+                  start360: t("widget.table.start360"),
+                  hint360: t("widget.table.hint360"),
+                  error360: t("widget.table.error360"),
+                  lang: locale,
+                }}
+              />
             </div>
           ) : null}
         </>

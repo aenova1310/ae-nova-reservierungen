@@ -11,6 +11,7 @@ export interface WidgetRestaurant {
   maxAdvanceDays: number;
   areas: { id: string; name: string; nameEn: string | null }[];
   privacy: { de: string | null; en: string | null; policyUrl: string | null; anonymizeAfterDays: number };
+  logo: { url: string; width: number; height: number } | null;
   showPoweredBy: boolean;
   today: string;
 }
@@ -22,6 +23,13 @@ export interface WidgetCandidate {
   areaId: string | null;
   minCapacity: number;
   maxCapacity: number;
+  media: {
+    kind: "PHOTO" | "PANORAMA_360";
+    url: string;
+    thumbUrl: string | null;
+    altDe: string;
+    altEn: string;
+  } | null;
 }
 
 export interface WidgetSlot {
