@@ -6,6 +6,7 @@ import { useId, useRef, useState } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { useAdminT } from "./i18n-provider";
 
 const ACCEPT = "image/jpeg,image/png,image/webp,image/avif";
 
@@ -34,6 +35,7 @@ export function ImageUpload({
   compact?: boolean;
 }) {
   const router = useRouter();
+  const { t } = useAdminT();
   const inputId = useId();
   const input = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
@@ -43,11 +45,11 @@ export function ImageUpload({
   const upload = (file: File) => {
     setError(null);
     if (!ACCEPT.split(",").includes(file.type)) {
-      setError(file.type === "image/svg+xml" ? "SVG ist aus Sicherheitsgründen nicht erlaubt. Bitte PNG oder JPG verwenden." : "Bitte ein JPG-, PNG-, WebP- oder AVIF-Bild wählen.");
+      setError(file.type === "image/svg+xml" ? t("media.err.svg") : t("media.err.type"));
       return;
     }
     if (file.size > maxBytes) {
-      setError(`Die Datei ist zu groß (${(file.size / 1024 / 1024).toFixed(1)} MB, erlaubt sind ${Math.round(maxBytes / 1024 / 1024)} MB).`);
+      setError(t("media.err.fileTooLarge", { size: (file.size / 1024 / 1024).toFixed(1), max: Math.round(maxBytes / 1024 / 1024) }));
       return;
     }
     const data = new FormData();
@@ -67,16 +69,16 @@ export function ImageUpload({
         /* leere Antwort */
       }
       if (xhr.status >= 200 && xhr.status < 300) {
-        toast.success("Bild gespeichert.");
+        toast.success(t("media.saved"));
         router.refresh();
         onDone?.();
       } else {
-        setError(body.message ?? "Upload fehlgeschlagen. Bitte erneut versuchen.");
+        setError(body.message ?? t("media.err.uploadFailed"));
       }
     };
     xhr.onerror = () => {
       setProgress(null);
-      setError("Keine Verbindung zum Server. Bitte erneut versuchen.");
+      setError(t("media.err.offline"));
     };
     setProgress(0);
     xhr.send(data);
@@ -105,7 +107,7 @@ export function ImageUpload({
       >
         <Upload className="size-5 text-muted-foreground" aria-hidden />
         <p className="text-sm">
-          Bild hierher ziehen oder{" "}
+          {t("media.dropOr")}{" "}
           <Button type="button" variant="link" className="h-auto p-0" disabled={busy} onClick={() => input.current?.click()}>
             {label}
           </Button>
@@ -126,11 +128,11 @@ export function ImageUpload({
           }}
         />
         {busy ? (
-          <div className="mt-2 w-full max-w-xs" role="progressbar" aria-valuenow={progress ?? 0} aria-valuemin={0} aria-valuemax={100} aria-label="Upload-Fortschritt">
+          <div className="mt-2 w-full max-w-xs" role="progressbar" aria-valuenow={progress ?? 0} aria-valuemin={0} aria-valuemax={100} aria-label={t("media.progress")}>
             <div className="h-1.5 overflow-hidden rounded-full bg-border">
               <div className="h-full bg-primary transition-[width]" style={{ width: `${progress}%` }} />
             </div>
-            <p className="mt-1 text-xs text-muted-foreground">{progress === 100 ? "Wird verarbeitet …" : `${progress} %`}</p>
+            <p className="mt-1 text-xs text-muted-foreground">{progress === 100 ? t("media.processing") : t("media.percent", { percent: progress })}</p>
           </div>
         ) : null}
       </div>

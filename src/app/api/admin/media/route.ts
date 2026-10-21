@@ -1,10 +1,12 @@
 import { z } from "zod";
+import { msg, translateMessage } from "@/i18n/admin";
 import { env } from "@/server/env";
 import { jsonError } from "@/server/http/request";
 import { FeatureNotInPlanError } from "@/server/plans/features";
 import { MediaError, removeLogo, removeTableMedia, updateTableMediaAlt, uploadLogo, uploadTableMedia } from "@/server/media/service";
 import { rateLimit } from "@/server/auth/rate-limit";
 import { getSessionUser } from "@/server/auth/session";
+import { getAdminT } from "@/server/i18n";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 import { revalidatePath } from "next/cache";
 import { formatMb, MEDIA_LIMITS } from "@/lib/media-limits";
@@ -38,16 +40,17 @@ export async function POST(request: Request) {
   if (!sameOrigin(request)) return jsonError("FORBIDDEN_ORIGIN", 403);
   // API: 401 statt Weiterleitung zur Login-Seite
   const sessionUser = await getSessionUser();
-  if (!sessionUser) return jsonError("UNAUTHENTICATED", 401, { message: "Bitte erneut anmelden." });
+  const { t } = await getAdminT();
+  if (!sessionUser) return jsonError("UNAUTHENTICATED", 401, { message: t("media.err.reauth") });
 
   // Größe und Rate-Limit prüfen, BEVOR der Body in den Speicher gelesen wird
   const length = Number(request.headers.get("content-length"));
   if (!Number.isFinite(length) || length <= 0) return jsonError("LENGTH_REQUIRED", 411);
   if (length > MEDIA_LIMITS.requestBytes) {
-    return jsonError("TOO_LARGE", 413, { message: `Die Datei ist zu groß (max. ${formatMb(MEDIA_LIMITS.panoramaBytes)}).` });
+    return jsonError("TOO_LARGE", 413, { message: t("media.err.tooLarge", { mb: formatMb(MEDIA_LIMITS.panoramaBytes) }) });
   }
   const limit = rateLimit(`media:${sessionUser.id}`, 30, 10 * 60_000);
-  if (!limit.ok) return jsonError("RATE_LIMIT", 429, { message: "Zu viele Uploads. Bitte kurz warten." });
+  if (!limit.ok) return jsonError("RATE_LIMIT", 429, { message: t("media.err.rateLimit") });
 
   let form: FormData;
   try {
@@ -93,20 +96,20 @@ export async function POST(request: Request) {
     refresh(restaurant.slug);
     return Response.json({ ok: true });
   } catch (error) {
-    if (error instanceof MediaError) return jsonError("MEDIA", 422, { message: error.message });
+    if (error instanceof MediaError) return jsonError("MEDIA", 422, { message: translateMessage(t, error.message) });
     if (error instanceof FeatureNotInPlanError) {
-      return jsonError("FEATURE_NOT_IN_PLAN", 403, { message: "Die Tischansicht ist im Pro-Tarif enthalten." });
+      return jsonError("FEATURE_NOT_IN_PLAN", 403, { message: t("media.err.proOnly") });
     }
     console.error("[media] Upload fehlgeschlagen", error);
-    return jsonError("INTERNAL", 500, { message: "Upload fehlgeschlagen. Bitte erneut versuchen." });
+    return jsonError("INTERNAL", 500, { message: t("media.err.uploadFailed") });
   }
 }
 
 async function fileFrom(form: FormData): Promise<Buffer> {
   const file = form.get("file");
-  if (!(file instanceof File)) throw new MediaError("Bitte eine Bilddatei auswählen.");
+  if (!(file instanceof File)) throw new MediaError(msg("media.err.noFile"));
   // Vor dem Einlesen grob begrenzen (genaue Grenzen je Medienart in process.ts)
-  if (file.size > MEDIA_LIMITS.panoramaBytes) throw new MediaError(`Die Datei ist zu groß (max. ${formatMb(MEDIA_LIMITS.panoramaBytes)}).`);
+  if (file.size > MEDIA_LIMITS.panoramaBytes) throw new MediaError(msg("media.err.tooLarge", { mb: formatMb(MEDIA_LIMITS.panoramaBytes) }));
   return Buffer.from(await file.arrayBuffer());
 }
 

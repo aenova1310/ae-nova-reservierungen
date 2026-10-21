@@ -20,11 +20,13 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
   const { restaurant: slug } = await props.params;
   const { restaurant } = await requireRestaurantAccess(slug, { ownerOnly: true });
   const full = await db.restaurant.findUniqueOrThrow({ where: { id: restaurant.id }, include: { settings: true, branding: true } });
-  const { t, locale } = await getAdminT();
+  const { t } = await getAdminT();
   const s = full.settings!;
   const b = full.branding;
-  // Platzhalter in der Sprache der Verwaltung
-  const defaultPrivacy = getTranslator(locale)("privacy.default", { restaurant: full.name, days: s.anonymizeAfterDays });
+  // Platzhalter = Standardtext für Gäste in der Sprache des jeweiligen Feldes (nicht der Admin-Sprache)
+  const privacyVars = { restaurant: full.name, days: s.anonymizeAfterDays };
+  const defaultPrivacyDe = getTranslator("de")("privacy.default", privacyVars);
+  const defaultPrivacyEn = getTranslator("en")("privacy.default", privacyVars);
 
   return (
     <>
@@ -135,10 +137,10 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
         <Section title={t("settings.privacy")} description={t("settings.privacyDesc")}>
           <ActionForm action={savePrivacyAction.bind(null, slug)} className="space-y-4">
             <Field label={t("settings.privacyDe")} htmlFor="privacyNoticeDe">
-              <Textarea id="privacyNoticeDe" name="privacyNoticeDe" rows={5} defaultValue={s.privacyNoticeDe ?? ""} placeholder={defaultPrivacy} />
+              <Textarea id="privacyNoticeDe" name="privacyNoticeDe" rows={5} defaultValue={s.privacyNoticeDe ?? ""} placeholder={defaultPrivacyDe} />
             </Field>
             <Field label={t("settings.privacyEn")} htmlFor="privacyNoticeEn">
-              <Textarea id="privacyNoticeEn" name="privacyNoticeEn" rows={4} defaultValue={s.privacyNoticeEn ?? ""} />
+              <Textarea id="privacyNoticeEn" name="privacyNoticeEn" rows={4} defaultValue={s.privacyNoticeEn ?? ""} placeholder={defaultPrivacyEn} />
             </Field>
             <div className="grid gap-4 sm:grid-cols-2">
               <Field label={t("settings.policyUrl")} htmlFor="privacyPolicyUrl" error="privacyPolicyUrl">

@@ -1,7 +1,8 @@
 import "server-only";
 import { createHash } from "node:crypto";
 import sharp, { type Metadata, type Sharp } from "sharp";
-import { MEDIA_LIMITS } from "@/lib/media-limits";
+import { msg } from "@/i18n/admin";
+import { formatMb, MEDIA_LIMITS } from "@/lib/media-limits";
 
 /**
  * Bildverarbeitung für Uploads.
@@ -12,6 +13,7 @@ import { MEDIA_LIMITS } from "@/lib/media-limits";
  *   (GPS-Position, Kamera, Zeitstempel) – sharp übernimmt Metadaten nur mit
  *   `.withMetadata()`, das hier bewusst nie verwendet wird.
  * - Ausgabe in festen Größen, damit das Widget auch mobil schnell lädt.
+ * - Fehlermeldungen sind Schlüssel (`msg("media.err.…")`); übersetzt wird in der Upload-Route.
  */
 export class MediaError extends Error {}
 
@@ -56,23 +58,23 @@ export interface ProcessedImage {
 const hashOf = (buf: Buffer) => createHash("sha256").update(buf).digest("hex").slice(0, 24);
 
 async function inspect(input: Buffer, maxBytes: number) {
-  if (input.length === 0) throw new MediaError("Die Datei ist leer.");
+  if (input.length === 0) throw new MediaError(msg("media.err.empty"));
   if (input.length > maxBytes) {
-    throw new MediaError(`Die Datei ist zu groß (max. ${Math.round(maxBytes / 1024 / 1024)} MB).`);
+    throw new MediaError(msg("media.err.tooLarge", { mb: formatMb(maxBytes) }));
   }
   let meta: Metadata;
   try {
     meta = await sharp(input, { limitInputPixels: LIMITS.maxInputPixels }).metadata();
   } catch {
-    throw new MediaError("Die Datei ist kein lesbares Bild. Erlaubt sind JPG, PNG, WebP und AVIF.");
+    throw new MediaError(msg("media.err.unreadable"));
   }
   if (meta.format === "heif") {
-    throw new MediaError("HEIC-Fotos (iPhone) bitte als JPG exportieren oder in den Kameraeinstellungen „Maximale Kompatibilität“ wählen.");
+    throw new MediaError(msg("media.err.heic"));
   }
   if (!meta.format || !ALLOWED_INPUT.has(meta.format)) {
-    throw new MediaError("Dieses Bildformat wird nicht unterstützt. Erlaubt sind JPG, PNG, WebP und AVIF.");
+    throw new MediaError(msg("media.err.format"));
   }
-  if (!meta.width || !meta.height) throw new MediaError("Bildgröße konnte nicht ermittelt werden.");
+  if (!meta.width || !meta.height) throw new MediaError(msg("media.err.dimensions"));
   // Ausrichtung laut EXIF berücksichtigen (Hochformat-Fotos von Smartphones)
   const rotated = (meta.orientation ?? 1) >= 5;
   return { width: rotated ? meta.height : meta.width, height: rotated ? meta.width : meta.height };
@@ -95,7 +97,7 @@ async function finish(pipeline: Sharp, kind: "webp" | "png"): Promise<ProcessedI
 /** Logo: max. 800 × 240 px, PNG mit Transparenz (funktioniert überall, auch in E-Mails). */
 export async function processLogo(input: Buffer): Promise<ProcessedImage> {
   const { width, height } = await inspect(input, LIMITS.logoBytes);
-  if (width < 32 || height < 16) throw new MediaError("Das Logo ist zu klein (mindestens 32 × 16 Pixel).");
+  if (width < 32 || height < 16) throw new MediaError(msg("media.err.logoTooSmall"));
   return withSlot(() =>
     finish(base(input).resize({ width: 800, height: 240, fit: "inside", withoutEnlargement: true }).png({ compressionLevel: 9 }), "png"),
   );
@@ -109,7 +111,7 @@ export interface ProcessedMedia {
 /** Tischfoto: max. 2000 px Kantenlänge (WebP), Vorschau 480 × 320. */
 export async function processTablePhoto(input: Buffer): Promise<ProcessedMedia> {
   const { width, height } = await inspect(input, LIMITS.photoBytes);
-  if (width < 400 || height < 300) throw new MediaError("Das Foto ist zu klein (mindestens 400 × 300 Pixel).");
+  if (width < 400 || height < 300) throw new MediaError(msg("media.err.photoTooSmall"));
   return withSlot(async () => {
     // Original nur EINMAL dekodieren; die Vorschau entsteht aus dem bereits verkleinerten Bild
     const main = await finish(base(input).resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true }).webp({ quality: 82 }), "webp");
@@ -123,11 +125,9 @@ export async function processPanorama(input: Buffer): Promise<ProcessedMedia> {
   const { width, height } = await inspect(input, LIMITS.panoramaBytes);
   const ratio = width / height;
   if (ratio < 1.9 || ratio > 2.1) {
-    throw new MediaError(
-      `Ein 360°-Panorama muss doppelt so breit wie hoch sein (equirectangular, 2:1). Dieses Bild ist ${width} × ${height}. Für normale Fotos bitte „Foto“ wählen.`,
-    );
+    throw new MediaError(msg("media.err.panoramaRatio", { width, height }));
   }
-  if (width < 2000) throw new MediaError("Das Panorama ist zu klein (mindestens 2000 × 1000 Pixel).");
+  if (width < 2000) throw new MediaError(msg("media.err.panoramaTooSmall"));
   return withSlot(async () => {
     const main = await finish(base(input).resize({ width: PANORAMA_MAX_WIDTH, withoutEnlargement: true }).webp({ quality: 80 }), "webp");
     // Vorschau: Ausschnitt aus der Bildmitte (Blickrichtung "vorne"), aus dem bereits

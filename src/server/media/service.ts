@@ -1,4 +1,5 @@
 import "server-only";
+import { msg } from "@/i18n/admin";
 import { db } from "../db";
 import { hasFeature, requireFeature, type PlanCode } from "../plans/features";
 import { MediaError, processLogo, processPanorama, processTablePhoto, type ProcessedImage } from "./process";
@@ -124,7 +125,7 @@ export async function removeLogo(restaurant: RestaurantRef, userId: string) {
 /** Tisch muss zum Restaurant gehören – sonst "nicht gefunden" (kein Hinweis auf fremde Daten). */
 async function ownTable(restaurantId: string, tableId: string) {
   const table = await db.table.findFirst({ where: { id: tableId, restaurantId }, select: { id: true, name: true } });
-  if (!table) throw new MediaError("Tisch nicht gefunden.");
+  if (!table) throw new MediaError(msg("media.err.tableNotFound"));
   return table;
 }
 

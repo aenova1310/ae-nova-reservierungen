@@ -15,7 +15,7 @@ function CopyBlock({ code, label }: { code: string; label: string }) {
   const [copied, setCopied] = useState(false);
   return (
     <div className="relative">
-      <pre className="overflow-x-auto rounded-md border bg-muted/50 p-4 pr-24 text-xs leading-relaxed">
+      <pre tabIndex={0} aria-label={t("embed.code")} className="overflow-x-auto focus-visible:outline-2 focus-visible:outline-ring rounded-md border bg-muted/50 p-4 pr-24 text-xs leading-relaxed">
         <code>{code}</code>
       </pre>
       <Button
