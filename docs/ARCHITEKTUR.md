@@ -575,6 +575,9 @@ Performance.
 | DB-Zugriff | roher Client nur in `src/server/**` | Tenant-Modelle über `tenantDb()`; einzelne Admin-Seiten lesen Nicht-Tenant-Modelle (Restaurant, Membership, Branding) direkt **nach** `requireRestaurantAccess` und immer mit `restaurantId`/`organizationId`-Filter | ESLint verbietet den generierten Prisma-Code außerhalb von `src/server/**` sowie Server-Module in Client-Komponenten |
 | Lokale Mails | Mailpit | Datei-Outbox `.mail-outbox/` (HTML + .ics) | kein weiterer Dienst nötig |
 | Doppelbuchungs-Constraint | generierte Spalte `during` | Ausdruck `tsrange(...)` direkt im Constraint | Prisma kennt die Spalte nicht → kein Migrations-Drift (geprüft: leere Folgemigration) |
+| Medien-Upload | vorab signierte URL direkt in den Bucket | Upload über den Server (`/api/admin/media`) | jedes Bild wird vor dem Speichern geprüft, gedreht, verkleinert und von Metadaten (GPS) befreit; kein öffentlicher Bucket nötig |
+| Medien-Auslieferung | (offen) | über die eigene Domain `/media/<key>` | Widget lädt nichts von Dritten (TDDDG), Bucket bleibt privat, Speicher austauschbar ohne URL-Änderung |
+| Tischansicht im Widget | Lightbox (Dialog) | inline + Browser-Vollbild; 360°-Viewer erst auf Klick | ein Dialog läge im eingebetteten iframe (Auto-Höhe) außerhalb des sichtbaren Bereichs; three.js (~620 kB) nur bei Bedarf |
 | Formulare im Admin | `<form action>` | `onSubmit` + `startTransition` | React 19 setzt Formulare nach Form-Actions zurück – bei Validierungsfehlern gingen Eingaben verloren |
 
 **Geprüft:** 50 Unit-Tests, 16 Integrationstests gegen PostgreSQL 16 (u. a. 12 parallele Buchungen →
@@ -584,7 +587,7 @@ Einbettung auf fremdem Origin, axe-Prüfung (WCAG 2.1 AA) ohne Befunde.
 **Nicht geprüft:** Docker-Image-Build (in der Entwicklungsumgebung kein Docker-Daemon), Versand über
 Resend (ohne API-Schlüssel nur Datei-Outbox).
 
-**Vorbereitet, aber noch ohne Funktion** (bewusst, Phase 2/3): `TableViewPreview`-Registry (nur
-Foto-Renderer und Platzhalter, kein Upload), Status `PENDING_PAYMENT`/Job `expire-holds` (ohne Stripe-Fluss),
+**Vorbereitet, aber noch ohne Funktion** (bewusst, Phase 2/3): Renderer für Video/3D in der
+`TableViewPreview`-Registry, Status `PENDING_PAYMENT`/Job `expire-holds` (ohne Stripe-Fluss),
 `RESERVATION_REMINDER`/`reminderSentAt` (ohne Job), `StatsDaily` (Kennzahlen kommen in Phase 2),
 `PasswordResetToken`/`Invitation` (Mitarbeiter werden im MVP mit Startpasswort angelegt).

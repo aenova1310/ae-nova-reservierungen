@@ -18,13 +18,12 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | Admin | Heute-Übersicht, Reservierungsliste (Filter, Suche, Status), Detail mit Verlauf, Umbuchen, Storno, Telefon-/Walk-in-Erfassung, Tagesplan pro Tisch, Tische/Bereiche/Kombinationen, Öffnungszeiten/Schichten/Ruhetage/Sonderschließungen, Verweildauer, Puffer, Slot-Raster, Online-Kontingent, Bestätigungsmodus, Branding, Datenschutztext, Team |
 | Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
 | Super-Admin | `/superadmin`: Mandantenübersicht mit Buchungsvolumen und Monatsumsatz, Restaurant inkl. Inhaber-Zugang anlegen, sperren/freischalten, Tarif wechseln, Preise pflegen |
+| Medien | Logo (alle Tarife) und Tischansicht „So sitzen Sie“ (Pro): Foto mit Vergrößern (Browser-Vollbild, auch im iframe) oder interaktives 360°-Panorama (Photo Sphere Viewer, lokal gebündelt, erst bei Bedarf geladen). Upload mit Ziehen & Ablegen; Bilder werden serverseitig gedreht, verkleinert, in WebP/PNG umgewandelt und von **allen Metadaten (GPS, Kamera)** befreit; SVG wird abgelehnt |
 | Statistik (Pro) | Reservierungen, Gäste, No-Show-Quote, Online-Anteil, Stornierungen pro Woche/Monat mit Vergleich zum Vorzeitraum; Auslastungs-Heatmap Wochentag × Uhrzeit; Tabellenansicht; im Basic-Tarif serverseitig gesperrt |
 | DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
 
-**Noch nicht enthalten (geplant):** Phase 2 – Raumplan-Editor, Tischansicht/360°-Viewer und
-Medien-Upload (die Komponente `TableViewPreview` mit Renderer-Registry ist vorbereitet, zeigt aber
-bis dahin den Platzhalter), Anzahlung mit Stripe Connect (Datenmodell und Status
-`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt), Logo-Upload. Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
+**Noch nicht enthalten (geplant):** Phase 2 – Raumplan-Editor, Anzahlung mit Stripe Connect (Datenmodell und Status
+`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt). Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
 Passwort-Zurücksetzen per Mail.
 
 ## Schnellstart (lokal)
@@ -95,6 +94,29 @@ Im Admin unter **Website-Einbindung** gibt es den Code mit Live-Vorschau. Kurzfo
 Optionale Attribute: `data-lang="en"`, `data-label="…"`, `data-color="#6B1E2E"`, `data-target="#id"`.
 Nur `/embed/*` darf von fremden Seiten eingerahmt werden (`frame-ancestors *`), alle anderen Routen
 senden `frame-ancestors 'none'` und `X-Frame-Options: DENY`.
+
+## Medien-Speicher
+
+Logos und Tischbilder werden **immer über die eigene Domain** ausgeliefert (`/media/<schlüssel>`):
+Der Bucket bleibt privat, das Widget lädt nichts von Drittanbietern, und Schlüssel enthalten einen
+Inhalts-Hash (unbegrenzt cachebar). Uploads laufen über den Server (`/api/admin/media`), damit jedes
+Bild geprüft und bereinigt wird – geschützt durch Session, Origin-Prüfung (CSRF), Rollen,
+Tarif-Gate und Rate-Limit.
+
+| Variable | Entwicklung | Produktion (Hetzner Object Storage) |
+|---|---|---|
+| `MEDIA_DRIVER` | `local` | `s3` |
+| `MEDIA_LOCAL_DIR` | `.media` | – |
+| `S3_ENDPOINT` | – | `https://fsn1.your-objectstorage.com` |
+| `S3_REGION` | – | `fsn1` |
+| `S3_BUCKET` / `S3_ACCESS_KEY_ID` / `S3_SECRET_ACCESS_KEY` | – | Bucket **privat** anlegen, Zugangsschlüssel in der Hetzner Console |
+
+S3-Treiber gegen einen lokalen S3-kompatiblen Server testen (z. B. MinIO oder `moto_server -p 9100`):
+`S3_TEST_ENDPOINT=http://localhost:9100 npm run test:integration`.
+
+Grenzen: Logo max. 3 MB (→ max. 800 × 240 px PNG), Foto max. 15 MB (→ max. 2000 px WebP),
+360°-Panorama max. 30 MB, Seitenverhältnis 2:1 (→ 4096 × 2048 WebP; mehr können viele Mobilgeräte
+nicht darstellen). iPhone-HEIC bitte als JPG exportieren.
 
 ## Hintergrundjobs
 

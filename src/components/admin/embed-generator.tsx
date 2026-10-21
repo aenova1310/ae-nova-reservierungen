@@ -52,7 +52,7 @@ export function EmbedGenerator({ appUrl, slug, brandColor, restaurantName }: { a
     if (mode === "iframe") {
       const src = `${appUrl}/embed/${slug}${lang === "en" ? "?lang=en" : ""}`;
       return `<iframe id="ae-nova-${slug}" src="${src}" title="Tischreservierung"
-  style="width:100%;height:640px;border:0" loading="lazy" allow="payment"></iframe>
+  style="width:100%;height:640px;border:0" loading="lazy" allow="payment; fullscreen" allowfullscreen></iframe>
 <script>
   // Höhe automatisch anpassen (optional)
   window.addEventListener("message", function (e) {

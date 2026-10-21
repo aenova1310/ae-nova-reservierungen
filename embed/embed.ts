@@ -43,7 +43,8 @@
     frame.src = src;
     frame.title = lang === "en" ? "Table booking" : "Tischreservierung";
     frame.loading = "lazy";
-    frame.allow = "payment";
+    frame.allow = "payment; fullscreen";
+    frame.allowFullscreen = true;
     frame.style.cssText = "display:block;width:100%;height:640px;border:0;background:transparent;";
     frames.add(frame);
     return frame;

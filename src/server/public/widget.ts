@@ -5,6 +5,7 @@ import { loadAvailabilityContext, loadRestaurantConfig } from "../availability/l
 import { addDaysToDate, daysBetween, utcToLocalDate, type LocalDate } from "../availability/time";
 import { hasFeature } from "../plans/features";
 import { readableOn, isHexColor } from "@/lib/color";
+import { logoView, publicTableMedia, type TableMediaView } from "../media/service";
 
 /** Öffentliche, für Gäste unbedenkliche Restaurantdaten für das Widget. */
 export async function getPublicRestaurant(slug: string) {
@@ -33,6 +34,7 @@ export async function getPublicRestaurant(slug: string) {
       policyUrl: r.settings.privacyPolicyUrl,
       anonymizeAfterDays: r.settings.anonymizeAfterDays,
     },
+    logo: logoView(r.branding),
     branding: {
       color: brand,
       colorContrast: readableOn(brand),
@@ -54,25 +56,29 @@ export interface PublicCandidate {
   areaId: string | null;
   minCapacity: number;
   maxCapacity: number;
+  /** Tischansicht (nur Pro, nur Einzeltische) */
+  media: TableMediaView | null;
 }
 
-const toPublicCandidate = (c: Candidate): PublicCandidate => ({
+const toPublicCandidate = (c: Candidate, media: Map<string, TableMediaView>): PublicCandidate => ({
   kind: c.kind,
   id: c.id,
   name: c.name,
   areaId: c.areaId,
   minCapacity: c.minCapacity,
   maxCapacity: c.maxCapacity,
+  media: c.kind === "table" ? (media.get(c.id) ?? null) : null,
 });
 
 /** Freie Slots eines Tages (nur verfügbare werden ausgeliefert). */
 export async function getPublicAvailability(slug: string, date: LocalDate, partySize: number) {
-  const r = await db.restaurant.findUnique({ where: { slug }, select: { id: true, status: true } });
+  const r = await db.restaurant.findUnique({ where: { slug }, select: { id: true, status: true, planCode: true } });
   if (!r || r.status !== "ACTIVE") return null;
   const config = await loadRestaurantConfig(db, r.id);
   const ctx = await loadAvailabilityContext(db, config, date);
-  const day = computeDayAvailability(ctx, { date, partySize, channel: "ONLINE" });
   const showTables = config.allocationMode === "GUEST_CHOOSES_TABLE";
+  const media = showTables ? await publicTableMedia(r) : new Map<string, TableMediaView>();
+  const day = computeDayAvailability(ctx, { date, partySize, channel: "ONLINE" });
   return {
     date,
     closed: day.closed,
@@ -85,7 +91,7 @@ export async function getPublicAvailability(slug: string, date: LocalDate, party
         shift: s.shiftName,
         // Im Auto-Modus nur die Bereiche, nicht die einzelnen Tische preisgeben
         areaIds: [...new Set(s.candidates.map((c) => c.areaId).filter((a): a is string => !!a))],
-        candidates: showTables ? s.candidates.map(toPublicCandidate) : [],
+        candidates: showTables ? s.candidates.map((c) => toPublicCandidate(c, media)) : [],
       })),
   };
 }

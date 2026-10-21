@@ -13,6 +13,14 @@ const schema = z.object({
   CRON_SECRET: z.string().min(8),
   EMAIL_FROM: z.string().min(3).default("A&E NOVA Reservierungen <reservierung@localhost>"),
   RESEND_API_KEY: z.string().optional(),
+  /** Medien-Speicher: "local" (Entwicklung, Dateisystem) oder "s3" (Hetzner Object Storage, MinIO, …) */
+  MEDIA_DRIVER: z.enum(["local", "s3"]).default("local"),
+  MEDIA_LOCAL_DIR: z.string().default(".media"),
+  S3_ENDPOINT: z.string().url().optional(),
+  S3_REGION: z.string().default("eu-central"),
+  S3_BUCKET: z.string().optional(),
+  S3_ACCESS_KEY_ID: z.string().optional(),
+  S3_SECRET_ACCESS_KEY: z.string().optional(),
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
 });
 
@@ -20,7 +28,9 @@ let cached: z.infer<typeof schema> | null = null;
 
 export function env() {
   if (!cached) {
-    const parsed = schema.safeParse(process.env);
+    // Leere Werte (z. B. `S3_ENDPOINT=""` aus .env.example) gelten als nicht gesetzt
+    const raw = Object.fromEntries(Object.entries(process.env).filter(([, v]) => v !== undefined && v.trim() !== ""));
+    const parsed = schema.safeParse(raw);
     if (!parsed.success) {
       throw new Error(
         "Ungültige Umgebungsvariablen: " +
