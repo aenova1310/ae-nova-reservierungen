@@ -13,7 +13,7 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | Zuteilung | Pro Restaurant: **automatisch** (kleinster passender Tisch, dann Kombinationen; Gast wählt höchstens den Bereich) oder **Tischwahl durch den Gast** |
 | Doppelbuchungen | Ausgeschlossen durch Advisory-Lock pro Restaurant **und** PostgreSQL-Exclusion-Constraint (getestet mit 12 parallelen Buchungen) |
 | Ändern/Stornieren | Tokenbasierter Link in der E-Mail, ohne Login, bis zum Reservierungsbeginn; Tisch wird sofort frei; Mail an Gast und Restaurant |
-| E-Mails | Bestätigung, Anfrage, Ablehnung, Änderung, Storno (Gast/Restaurant) mit `.ics` (UID/SEQUENCE/CANCEL); Outbox mit automatischem Nachversand |
+| E-Mails | Bestätigung, Anfrage, Ablehnung, Änderung, Storno (Gast/Restaurant), Erinnerung vor dem Besuch (Vorlaufzeit einstellbar) mit `.ics` (UID/SEQUENCE/CANCEL); Outbox mit automatischem Nachversand |
 | Einbindung | `<script>` (Button mit Dialog oder inline) und `<iframe>` mit automatischer Höhe; Code-Generator mit Live-Vorschau |
 | Admin | Heute-Übersicht, Reservierungsliste (Filter, Suche, Status), Detail mit Verlauf, Umbuchen, Storno, Telefon-/Walk-in-Erfassung, Tagesplan pro Tisch, Tische/Bereiche/Kombinationen, Öffnungszeiten/Schichten/Ruhetage/Sonderschließungen, Verweildauer, Puffer, Slot-Raster, Online-Kontingent, Bestätigungsmodus, Branding, Datenschutztext, Team |
 | Rollen & Tarife | Inhaber/Mitarbeiter (serverseitig geprüft), Tarif-Gates im Code (`src/server/plans/features.ts`); Basic: 1 Zugang + „powered by“ |
@@ -24,7 +24,7 @@ Architektur, Datenmodell und Entscheidungen: [`docs/ARCHITEKTUR.md`](docs/ARCHIT
 | DSGVO | Keine Cookies/kein localStorage im Widget, Schriften selbst gehostet, Anonymisierung nach ≤ 180 Tagen, Datenauskunft (JSON) und Löschung auf Anfrage mit Protokoll |
 
 **Noch nicht enthalten (geplant):** Phase 2 – Anzahlung mit Stripe Connect (Datenmodell und Status
-`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt). Phase 3 – Erinnerungs-Mails (Typ und Feld vorhanden, Job fehlt), englischer Admin,
+`PENDING_PAYMENT` sind vorbereitet, Zahlungsfluss fehlt). Phase 3 – englischer Admin,
 Passwort-Zurücksetzen per Mail.
 
 ## Schnellstart (lokal)
@@ -127,6 +127,7 @@ Alle Jobs sind HTTP-Endpunkte, abgesichert mit `Authorization: Bearer $CRON_SECR
 |---|---|---|
 | `POST /api/cron/expire-holds` | jede Minute | unbezahlte Holds (Anzahlung, Phase 2) verfallen lassen |
 | `POST /api/cron/send-emails` | alle 5 Minuten | wartende/fehlgeschlagene Mails nachsenden |
+| `POST /api/cron/send-reminders` | alle 15 Minuten | Erinnerungs-Mails vor dem Besuch (Vorlaufzeit je Restaurant einstellbar) |
 | `POST /api/cron/anonymize` | täglich | Gastdaten nach Ablauf der Frist anonymisieren |
 | `POST /api/cron/cleanup` | täglich | abgelaufene Sessions löschen |
 
@@ -144,7 +145,7 @@ Die App ist als Next.js-`standalone`-Build portabel. Empfohlen (siehe Architektu
 4. Umgebungsvariablen aus `.env.example` setzen (`APP_URL` = öffentliche Domain, starke Secrets).
 5. Migrationen bei jedem Deploy: Pre-Deploy-Kommando `npx prisma migrate deploy` (Image-Target
    `migrate`) oder einmalig `docker compose run --rm migrate`.
-6. Scheduled Tasks in Coolify für die vier Cron-Endpunkte anlegen (oder den `cron`-Dienst nutzen).
+6. Scheduled Tasks in Coolify für die fünf Cron-Endpunkte anlegen (oder den `cron`-Dienst nutzen).
 7. Resend: Absenderdomain mit **Region eu-west-1** anlegen, SPF/DKIM setzen, `RESEND_API_KEY` eintragen.
 
 Mit Docker Compose auf einem eigenen Server:

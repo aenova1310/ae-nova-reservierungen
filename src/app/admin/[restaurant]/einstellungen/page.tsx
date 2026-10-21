@@ -10,7 +10,8 @@ import { WIDGET_FONTS } from "@/lib/fonts";
 import { db } from "@/server/db";
 import { hasFeature } from "@/server/plans/features";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
-import { saveBookingRulesAction, saveBrandingAction, saveContactAction, savePrivacyAction } from "./actions";
+import { REMINDER_HOURS_OPTIONS } from "@/server/email/reminders";
+import { saveBookingRulesAction, saveBrandingAction, saveContactAction, savePrivacyAction, saveReminderAction } from "./actions";
 
 const selectClass = "h-9 w-full rounded-md border border-input bg-background px-3 text-sm";
 
@@ -64,6 +65,22 @@ export default async function SettingsPage(props: PageProps<"/admin/[restaurant]
             <div className="sm:col-span-2 lg:col-span-3">
               <SubmitButton>Buchungsregeln speichern</SubmitButton>
             </div>
+          </ActionForm>
+        </Section>
+
+        <Section title="Erinnerung per E-Mail" description="Gäste mit E-Mail-Adresse erhalten vor dem Besuch eine kurze Erinnerung mit Link zum Ändern oder Stornieren. Das senkt nachweislich die No-Show-Quote.">
+          <ActionForm action={saveReminderAction.bind(null, slug)} className="flex flex-wrap items-end gap-4">
+            <Field label="Erinnerung senden" htmlFor="reminder" hint="Wer kurzfristiger bucht, erhält keine Erinnerung (die Bestätigung ist dann gerade erst angekommen).">
+              <select id="reminder" name="reminder" defaultValue={s.reminderEnabled ? String(s.reminderHoursBefore) : "off"} className={selectClass}>
+                <option value="off">Keine Erinnerung</option>
+                {REMINDER_HOURS_OPTIONS.map((h) => (
+                  <option key={h} value={h}>
+                    {h} Stunden vorher
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <SubmitButton>Speichern</SubmitButton>
           </ActionForm>
         </Section>
 

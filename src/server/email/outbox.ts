@@ -40,11 +40,24 @@ export async function enqueueEmail(
   return log.id;
 }
 
-const GUEST_TEMPLATES: Partial<Record<EmailType, { subject: MessageKey; intro: MessageKey; withManage: boolean; cancelled?: boolean }>> = {
+interface GuestTemplate {
+  subject: MessageKey;
+  intro: MessageKey;
+  withManage: boolean;
+  cancelled?: boolean;
+  /** Zusätzlicher Absatz nach der Einleitung. */
+  extra?: MessageKey;
+  /** Kalenderdatei anhängen (Standard: ja, außer bei Ablehnung). */
+  ics?: boolean;
+}
+
+const GUEST_TEMPLATES: Partial<Record<EmailType, GuestTemplate>> = {
   RESERVATION_CONFIRMED: { subject: "mail.confirmed.subject", intro: "mail.confirmed.intro", withManage: true },
   RESERVATION_MODIFIED: { subject: "mail.modified.subject", intro: "mail.modified.intro", withManage: true },
   RESERVATION_REQUESTED: { subject: "mail.requested.subject", intro: "mail.requested.intro", withManage: true },
-  RESERVATION_DECLINED: { subject: "mail.declined.subject", intro: "mail.declined.intro", withManage: false, cancelled: true },
+  RESERVATION_DECLINED: { subject: "mail.declined.subject", intro: "mail.declined.intro", withManage: false, cancelled: true, ics: false },
+  // Der Termin steht nach der Bestätigung schon im Kalender – kein zweiter Anhang
+  RESERVATION_REMINDER: { subject: "mail.reminder.subject", intro: "mail.reminder.intro", extra: "mail.reminder.cancelHint", withManage: true, ics: false },
   RESERVATION_CANCELLED_GUEST: {
     subject: "mail.cancelledGuest.subject",
     intro: "mail.cancelledGuest.intro",
@@ -104,7 +117,11 @@ function buildGuestMail(type: EmailType, r: MailReservation): EmailMessage | nul
     restaurantName: restaurant,
     heading: t(tpl.subject, { restaurant, date }),
     greeting: t("mail.greeting", { name: r.guestName ?? "" }),
-    paragraphs: [t(tpl.intro, { restaurant }), ...(tpl.cancelled ? [] : [t("mail.ics")])],
+    paragraphs: [
+      t(tpl.intro, { restaurant }),
+      ...(tpl.extra ? [t(tpl.extra, { restaurant })] : []),
+      ...(tpl.cancelled || tpl.ics === false ? [] : [t("mail.ics")]),
+    ],
     details,
     cta: tpl.withManage && link ? { label: t("mail.manage"), url: link, hint: t("mail.manageHint") } : undefined,
     footer: t("mail.footer", { restaurant }),
@@ -131,7 +148,7 @@ function buildGuestMail(type: EmailType, r: MailReservation): EmailMessage | nul
     html: renderMailHtml(layout),
     text: renderMailText(layout),
     replyTo: r.restaurant.email,
-    attachments: type === "RESERVATION_DECLINED" ? [] : [{ filename: "reservierung.ics", content: ics, contentType: "text/calendar; charset=utf-8" }],
+    attachments: tpl.ics === false ? [] : [{ filename: "reservierung.ics", content: ics, contentType: "text/calendar; charset=utf-8" }],
   };
 }
 
@@ -196,6 +213,11 @@ async function sendOne(id: string): Promise<"SENT" | "FAILED" | "SKIPPED"> {
     // Anonymisiert oder gelöscht → nichts mehr zu senden
     if (!r || r.anonymizedAt) {
       await db.emailLog.update({ where: { id }, data: { status: "SENT", providerMessageId: "skipped", error: "keine Daten" } });
+      return "SKIPPED";
+    }
+    // Erinnerung nur, solange die Reservierung noch gilt (Storno zwischen Vormerken und Versand)
+    if (log.type === "RESERVATION_REMINDER" && r.status !== "CONFIRMED") {
+      await db.emailLog.update({ where: { id }, data: { status: "SENT", providerMessageId: "skipped", error: "nicht mehr bestätigt" } });
       return "SKIPPED";
     }
     const message = log.type.startsWith("RESTAURANT_") ? buildRestaurantMail(log.type, r) : buildGuestMail(log.type, r);
