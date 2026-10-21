@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  BarChart3,
   CalendarClock,
   ClipboardList,
   Clock,
@@ -25,6 +26,7 @@ export interface NavItem {
 
 const ICONS: Record<string, LucideIcon> = {
   today: Sun,
+  stats: BarChart3,
   list: ClipboardList,
   timeline: CalendarClock,
   tables: LayoutGrid,

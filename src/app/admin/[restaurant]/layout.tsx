@@ -9,6 +9,7 @@ const NAV: NavItem[] = [
   { href: "", label: "Heute", icon: "today" },
   { href: "/reservierungen", label: "Reservierungen", icon: "list" },
   { href: "/timeline", label: "Tagesplan", icon: "timeline" },
+  { href: "/statistik", label: "Statistik", icon: "stats" },
   { href: "/tische", label: "Tische & Bereiche", icon: "tables" },
   { href: "/oeffnungszeiten", label: "Öffnungszeiten", icon: "hours" },
   { href: "/einstellungen", label: "Einstellungen", icon: "settings", ownerOnly: true },
