@@ -42,6 +42,28 @@ notieren (sie stehen auch in `/opt/ae-nova/deploy/.env`).
 
 Ohne eigene Domain lautet die Adresse z. B. `https://203-0-113-7.sslip.io` (funktioniert sofort).
 
+## Vorhandenen Server nutzen
+
+Das geht, wenn es ein eigener Linux-Server mit root-Zugang ist (vServer, Root-Server, Cloud-Server –
+**kein** reines Webhosting-Paket) mit **Ubuntu oder Debian** und mindestens **2 GB RAM** (besser 4 GB)
+sowie ca. **10 GB freiem Speicher**.
+
+Das Skript passt sich an:
+
+- **Kein Webserver auf 80/443:** wie oben – die App bringt HTTPS selbst mit.
+- **Es läuft schon ein Webserver** (nginx, Apache, Plesk …): daran wird nichts geändert. Die App
+  lauscht nur lokal; eine (Sub-)Domain ist dann Pflicht, und am Ende zeigt das Skript die
+  Weiterleitung, die im vorhandenen Webserver einzutragen ist (für nginx, Apache und Plesk):
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/aenova1310/ae-nova-reservierungen/deploy/testserver/deploy/install.sh | DOMAIN=reservierung.ihre-domain.de BRANCH=deploy/testserver bash
+  ```
+
+- **Firewall:** wird nur auf einem frischen Server eingeschaltet. Laufen schon andere Dienste,
+  bleibt sie unverändert (ist ufw aktiv, werden höchstens 80/443 freigegeben).
+- Installiert wird ausschließlich nach `/opt/ae-nova` und in Docker-Container mit eigenem Netz
+  und eigener Datenbank – bestehende Datenbanken und Websites werden nicht angefasst.
+
 ## 3. Eigene Domain (optional)
 
 1. Beim Domain-Anbieter einen **A-Eintrag** anlegen, z. B. `reservierung.ae-nova.de` → IPv4 des Servers.

@@ -73,7 +73,10 @@ services:
     depends_on: [app]
     restart: unless-stopped
 
+  # Nur im Modus "caddy" (eigener Webserver für HTTPS). Läuft auf dem Server bereits
+  # nginx/Apache/Plesk, übernimmt dieser HTTPS (Modus "proxy", siehe docker-compose.proxy.yml).
   caddy:
+    profiles: ["caddy"]
     image: caddy:2.10-alpine
     environment:
       DOMAIN: ${DOMAIN}

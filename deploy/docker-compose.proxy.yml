@@ -1,0 +1,6 @@
+# Modus "proxy": Der vorhandene Webserver (nginx, Apache, Plesk …) leitet die Domain
+# an die App weiter. Die App lauscht nur lokal auf 127.0.0.1:${APP_PORT}.
+services:
+  app:
+    ports:
+      - "127.0.0.1:${APP_PORT:-3000}:3000"
