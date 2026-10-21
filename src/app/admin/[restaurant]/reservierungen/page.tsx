@@ -2,22 +2,25 @@ import Link from "next/link";
 import { NewReservationDialog } from "@/components/admin/new-reservation-dialog";
 import { PageHeader } from "@/components/admin/page-header";
 import { ReservationTable } from "@/components/admin/reservation-table";
-import { STATUS_LABEL } from "@/components/admin/status-badge";
+import { statusLabel } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import type { AdminKey } from "@/i18n/admin";
 import { seatOptions } from "@/server/admin/options";
 import { dayBounds, listReservations, STATUS_FILTERS, type StatusFilter } from "@/server/admin/reservations";
 import { addDaysToDate, isLocalDate, utcToLocalDate, utcToLocalTime } from "@/server/availability/time";
+import { getAdminT } from "@/server/i18n";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 import { createManualReservationAction } from "./actions";
 
-const RANGES = { day: "Tag", upcoming: "Kommende 30 Tage", past: "Letzte 30 Tage" } as const;
+const RANGES = { day: "res.list.range.day", upcoming: "res.list.range.upcoming", past: "res.list.range.past" } as const satisfies Record<string, AdminKey>;
 const selectClass = "h-9 rounded-md border border-input bg-background px-3 text-sm";
 
 export default async function ReservationsPage(props: PageProps<"/admin/[restaurant]/reservierungen">) {
   const { restaurant: slug } = await props.params;
   const sp = await props.searchParams;
   const { restaurant, tdb } = await requireRestaurantAccess(slug);
+  const { t } = await getAdminT();
   const tz = restaurant.timezone;
   const today = utcToLocalDate(new Date(), tz);
 
@@ -34,14 +37,14 @@ export default async function ReservationsPage(props: PageProps<"/admin/[restaur
   // Suche ohne Datumsbezug: ein Jahr zurück bis ein Jahr voraus
   if (q) bounds = { from: dayBounds(addDaysToDate(today, -365), tz).from, to: dayBounds(addDaysToDate(today, 365), tz).to };
 
-  const [rows, seats] = await Promise.all([listReservations(tdb, { ...bounds, status, q, source }), seatOptions(tdb)]);
+  const [rows, seats] = await Promise.all([listReservations(tdb, { ...bounds, status, q, source }), seatOptions(tdb, t)]);
   const nav = (d: string) => `?range=day&date=${d}&status=${status}${source ? `&source=${source}` : ""}`;
 
   return (
     <>
       <PageHeader
-        title="Reservierungen"
-        description={`${rows.length} Einträge · ${rows.reduce((s, r) => s + r.partySize, 0)} Gäste`}
+        title={t("res.list.title")}
+        description={`${t("res.list.entries", { count: rows.length })} · ${t("res.list.guests", { count: rows.reduce((s, r) => s + r.partySize, 0) })}`}
         actions={
           <NewReservationDialog
             action={createManualReservationAction.bind(null, slug)}
@@ -55,45 +58,45 @@ export default async function ReservationsPage(props: PageProps<"/admin/[restaur
       <form method="get" className="mb-4 flex flex-wrap items-end gap-2" role="search">
         <div className="flex items-center gap-1">
           {range === "day" && !q ? (
-            <Button asChild variant="ghost" size="sm" aria-label="Vorheriger Tag">
+            <Button asChild variant="ghost" size="sm" aria-label={t("res.prevDay")}>
               <Link href={nav(addDaysToDate(date, -1))}>‹</Link>
             </Button>
           ) : null}
-          <label className="sr-only" htmlFor="f-date">Datum</label>
+          <label className="sr-only" htmlFor="f-date">{t("res.f.date")}</label>
           <Input id="f-date" type="date" name="date" defaultValue={date} className="h-9 w-40" />
           {range === "day" && !q ? (
-            <Button asChild variant="ghost" size="sm" aria-label="Nächster Tag">
+            <Button asChild variant="ghost" size="sm" aria-label={t("res.nextDay")}>
               <Link href={nav(addDaysToDate(date, 1))}>›</Link>
             </Button>
           ) : null}
         </div>
-        <label className="sr-only" htmlFor="f-range">Zeitraum</label>
+        <label className="sr-only" htmlFor="f-range">{t("res.list.range")}</label>
         <select id="f-range" name="range" defaultValue={range} className={selectClass}>
           {Object.entries(RANGES).map(([v, l]) => (
-            <option key={v} value={v}>{l}</option>
+            <option key={v} value={v}>{t(l)}</option>
           ))}
         </select>
-        <label className="sr-only" htmlFor="f-status">Status</label>
+        <label className="sr-only" htmlFor="f-status">{t("res.f.status")}</label>
         <select id="f-status" name="status" defaultValue={status} className={selectClass}>
-          <option value="open">Aktive</option>
+          <option value="open">{t("res.list.status.open")}</option>
           {(["REQUESTED", "CONFIRMED", "ARRIVED", "NO_SHOW", "CANCELLED"] as const).map((s) => (
-            <option key={s} value={s}>{STATUS_LABEL[s]}</option>
+            <option key={s} value={s}>{statusLabel(t, s)}</option>
           ))}
-          <option value="all">Alle</option>
+          <option value="all">{t("res.list.status.all")}</option>
         </select>
-        <label className="sr-only" htmlFor="f-source">Quelle</label>
+        <label className="sr-only" htmlFor="f-source">{t("res.f.source")}</label>
         <select id="f-source" name="source" defaultValue={source ?? ""} className={selectClass}>
-          <option value="">Alle Quellen</option>
-          <option value="ONLINE">Online</option>
-          <option value="PHONE">Telefon</option>
-          <option value="WALK_IN">Walk-in</option>
+          <option value="">{t("res.list.allSources")}</option>
+          <option value="ONLINE">{t("res.source.ONLINE")}</option>
+          <option value="PHONE">{t("res.source.PHONE")}</option>
+          <option value="WALK_IN">{t("res.source.WALK_IN")}</option>
         </select>
-        <label className="sr-only" htmlFor="f-q">Suche</label>
-        <Input id="f-q" name="q" type="search" placeholder="Name, E-Mail, Telefon, Code" defaultValue={q} className="h-9 w-56" />
-        <Button type="submit" variant="secondary" size="sm" className="h-9">Anzeigen</Button>
+        <label className="sr-only" htmlFor="f-q">{t("res.list.search")}</label>
+        <Input id="f-q" name="q" type="search" placeholder={t("res.list.searchPlaceholder")} defaultValue={q} className="h-9 w-56" />
+        <Button type="submit" variant="secondary" size="sm" className="h-9">{t("res.list.show")}</Button>
         {date !== today || q || status !== "open" || source || range !== "day" ? (
           <Button asChild variant="ghost" size="sm" className="h-9">
-            <Link href="?">Zurücksetzen</Link>
+            <Link href="?">{t("res.list.reset")}</Link>
           </Button>
         ) : null}
       </form>
@@ -103,7 +106,7 @@ export default async function ReservationsPage(props: PageProps<"/admin/[restaur
         slug={slug}
         timeZone={tz}
         showDate={range !== "day" || !!q}
-        empty={q ? "Keine Reservierung gefunden." : "Für diesen Zeitraum gibt es keine Reservierungen."}
+        empty={q ? t("res.list.emptySearch") : t("res.list.emptyRange")}
       />
     </>
   );

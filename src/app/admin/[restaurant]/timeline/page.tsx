@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { PageHeader } from "@/components/admin/page-header";
-import { STATUS_BAR, STATUS_LABEL } from "@/components/admin/status-badge";
+import { STATUS_BAR, statusLabel } from "@/components/admin/status-badge";
 import { Button } from "@/components/ui/button";
 import { formatDateLong, formatTime } from "@/i18n/messages";
 import { cn } from "@/lib/utils";
@@ -9,6 +9,7 @@ import { loadRestaurantConfig } from "@/server/availability/load";
 import { openingWindowsFor } from "@/server/availability/slots";
 import { addDaysToDate, isLocalDate, localToUtc, utcToLocalDate } from "@/server/availability/time";
 import { db } from "@/server/db";
+import { getAdminT } from "@/server/i18n";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 
 /** Tagesplan: eine Zeile pro Tisch, Reservierungen als Balken (inkl. Puffer). */
@@ -16,6 +17,7 @@ export default async function TimelinePage(props: PageProps<"/admin/[restaurant]
   const { restaurant: slug } = await props.params;
   const sp = await props.searchParams;
   const { restaurant, tdb } = await requireRestaurantAccess(slug);
+  const { t, locale } = await getAdminT();
   const tz = restaurant.timezone;
   const today = utcToLocalDate(new Date(), tz);
   const date = typeof sp.date === "string" && isLocalDate(sp.date) ? sp.date : today;
@@ -49,17 +51,17 @@ export default async function TimelinePage(props: PageProps<"/admin/[restaurant]
   return (
     <>
       <PageHeader
-        title="Tagesplan"
-        description={closedBy ? `${formatDateLong(dayBounds(date, tz).from, "de", tz)} · geschlossen` : formatDateLong(dayBounds(date, tz).from, "de", tz)}
+        title={t("res.timeline.title")}
+        description={closedBy ? t("res.timeline.closed", { date: formatDateLong(dayBounds(date, tz).from, locale, tz) }) : formatDateLong(dayBounds(date, tz).from, locale, tz)}
         actions={
           <div className="flex items-center gap-1">
-            <Button asChild variant="outline" size="sm" aria-label="Vorheriger Tag">
+            <Button asChild variant="outline" size="sm" aria-label={t("res.prevDay")}>
               <Link href={`?date=${addDaysToDate(date, -1)}`}>‹</Link>
             </Button>
             <Button asChild variant={date === today ? "secondary" : "outline"} size="sm">
-              <Link href="?">Heute</Link>
+              <Link href="?">{t("res.today.title")}</Link>
             </Button>
-            <Button asChild variant="outline" size="sm" aria-label="Nächster Tag">
+            <Button asChild variant="outline" size="sm" aria-label={t("res.nextDay")}>
               <Link href={`?date=${addDaysToDate(date, 1)}`}>›</Link>
             </Button>
           </div>
@@ -100,7 +102,13 @@ export default async function TimelinePage(props: PageProps<"/admin/[restaurant]
                       const left = pct(o.startsAt);
                       const width = Math.max(1.5, pct(r.endsAt) - left);
                       const bufferWidth = Math.max(0, pct(o.blockedUntil) - pct(r.endsAt));
-                      const label = `${formatTime(o.startsAt, "de", tz)}–${formatTime(r.endsAt, "de", tz)} ${r.guestName ?? "–"}, ${r.partySize} P., ${STATUS_LABEL[r.status]}`;
+                      const label = t("res.timeline.barLabel", {
+                        from: formatTime(o.startsAt, locale, tz),
+                        to: formatTime(r.endsAt, locale, tz),
+                        name: r.guestName ?? "–",
+                        size: r.partySize,
+                        status: statusLabel(t, r.status),
+                      });
                       return (
                         <span key={o.id}>
                           <Link
@@ -114,14 +122,14 @@ export default async function TimelinePage(props: PageProps<"/admin/[restaurant]
                             )}
                             style={{ left: `${left}%`, width: `${width}%` }}
                           >
-                            <span className="tabular mr-1.5">{formatTime(o.startsAt, "de", tz)}</span>
+                            <span className="tabular mr-1.5">{formatTime(o.startsAt, locale, tz)}</span>
                             <span className="truncate font-medium">{r.guestName ?? r.code}</span>
                             <span className="ml-1.5">{r.partySize}</span>
                           </Link>
                           {bufferWidth > 0 ? (
                             <span
                               aria-hidden
-                              title="Puffer"
+                              title={t("res.timeline.buffer")}
                               className="absolute top-3 bottom-3 rounded-r-sm bg-[repeating-linear-gradient(135deg,var(--border)_0_3px,transparent_3px_6px)]"
                               style={{ left: `${left + width}%`, width: `${bufferWidth}%` }}
                             />
@@ -140,16 +148,16 @@ export default async function TimelinePage(props: PageProps<"/admin/[restaurant]
         {(["REQUESTED", "CONFIRMED", "ARRIVED", "NO_SHOW"] as const).map((s) => (
           <span key={s} className="flex items-center gap-1.5">
             <span className={cn("inline-block size-3 rounded-sm border-l-[3px]", STATUS_BAR[s])} aria-hidden />
-            {STATUS_LABEL[s]}
+            {statusLabel(t, s)}
           </span>
         ))}
         <span className="flex items-center gap-1.5">
           <span className="inline-block h-2 w-4 bg-[repeating-linear-gradient(135deg,var(--border)_0_3px,transparent_3px_6px)]" aria-hidden />
-          Puffer
+          {t("res.timeline.buffer")}
         </span>
         {showNow ? (
           <span className="flex items-center gap-1.5">
-            <span className="inline-block h-3 w-px bg-bordeaux" aria-hidden /> Jetzt
+            <span className="inline-block h-3 w-px bg-bordeaux" aria-hidden /> {t("res.timeline.now")}
           </span>
         ) : null}
       </p>
