@@ -47,7 +47,7 @@ export const reservations = defineMessages(
     "res.today.kpi.arrived": "Bereits da",
     "res.today.kpi.requests": "Offene Anfragen",
     "res.today.next": "Nächste Gäste",
-    "res.today.viewTimeline": "Tagesplan ansehen",
+    "res.today.viewTimeline": "Tischplan ansehen",
     "res.today.empty": "Für heute stehen keine weiteren Gäste an.",
 
     "res.list.title": "Reservierungen",
@@ -93,7 +93,7 @@ export const reservations = defineMessages(
     "res.detail.reasonOptional": "Grund (optional)",
     "res.detail.notifyGuest": "Gast per E-Mail informieren",
     "res.detail.cancelSubmit": "Reservierung stornieren",
-    "res.detail.showInTimeline": "Im Tagesplan zeigen",
+    "res.detail.showInTimeline": "Im Tischplan zeigen",
     "res.release.button": "Tisch jetzt freigeben",
     "res.release.done": "Erledigt.",
 
@@ -183,7 +183,7 @@ export const reservations = defineMessages(
     "res.today.kpi.arrived": "Already here",
     "res.today.kpi.requests": "Open requests",
     "res.today.next": "Next guests",
-    "res.today.viewTimeline": "View day plan",
+    "res.today.viewTimeline": "View table plan",
     "res.today.empty": "No more guests expected today.",
 
     "res.list.title": "Reservations",
@@ -229,7 +229,7 @@ export const reservations = defineMessages(
     "res.detail.reasonOptional": "Reason (optional)",
     "res.detail.notifyGuest": "Notify guest by email",
     "res.detail.cancelSubmit": "Cancel reservation",
-    "res.detail.showInTimeline": "Show in day plan",
+    "res.detail.showInTimeline": "Show in table plan",
     "res.release.button": "Release table now",
     "res.release.done": "Done.",
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { PlanArea, PlanTable } from "@/lib/floorplan";
-import { formatMin, layoutForView, occupancyCurve, tableSnapshot, type LiveReservation } from "@/lib/service-view";
+import { evaluateMove, formatMin, layoutForView, occupancyCurve, tableSnapshot, type LiveReservation } from "@/lib/service-view";
 
 const res = (over: Partial<LiveReservation>): LiveReservation => ({
   id: "r",
@@ -87,5 +87,47 @@ describe("Anordnung ohne Raumplan", () => {
   it("formatiert Minuten auch nach Mitternacht", () => {
     expect(formatMin(19 * 60 + 5)).toBe("19:05");
     expect(formatMin(25 * 60 + 15)).toBe("01:15");
+  });
+});
+
+describe("Verschieben bewerten", () => {
+  const tables = [
+    { id: "t1", maxCapacity: 2 },
+    { id: "t2", maxCapacity: 2 },
+    { id: "t3", maxCapacity: 4 },
+  ];
+  const a = res({ id: "a", tableIds: ["t1"] });
+
+  it("frei, zu klein, unverändert", () => {
+    expect(evaluateMove(a, ["t1"], [a], tables)).toEqual({ kind: "same" });
+    expect(evaluateMove(a, ["t3"], [a], tables)).toEqual({ kind: "free", seats: 4, overCapacity: false });
+    expect(evaluateMove(res({ id: "big", partySize: 4, tableIds: ["t3"] }), ["t1"], [], tables)).toMatchObject({ kind: "free", overCapacity: true });
+  });
+
+  it("erkennt Tausch und blockiert bei mehreren Überschneidungen", () => {
+    const b = res({ id: "b", tableIds: ["t2"], startMin: 19 * 60 + 30, endMin: 21 * 60, blockedMin: 21 * 60 + 15 });
+    expect(evaluateMove(a, ["t2"], [a, b], tables)).toMatchObject({ kind: "swap", other: b, otherTo: ["t1"] });
+    // Kombination: die andere behält ihre übrigen Tische
+    const combo = res({ id: "combo", partySize: 5, tableIds: ["t2", "t3"], startMin: 19 * 60 + 30, endMin: 21 * 60, blockedMin: 21 * 60 + 15 });
+    expect(evaluateMove(a, ["t2"], [a, combo], tables)).toMatchObject({ kind: "swap", otherTo: ["t3", "t1"], otherOverCapacity: false });
+    const c = res({ id: "c", tableIds: ["t2"], startMin: 21 * 60 + 15, endMin: 22 * 60, blockedMin: 22 * 60 + 15 });
+    const late = res({ id: "late", tableIds: ["t1"], startMin: 18 * 60, endMin: 21 * 60 + 30, blockedMin: 21 * 60 + 45 });
+    expect(evaluateMove(late, ["t2"], [late, b, c], tables)).toMatchObject({ kind: "blocked" });
+  });
+
+  it("kein Tausch, wenn die bisherigen Tische für die andere Reservierung nicht frei sind", () => {
+    const b = res({ id: "b", tableIds: ["t2"], startMin: 21 * 60, endMin: 22 * 60, blockedMin: 22 * 60 + 15 });
+    const afterA = res({ id: "x", tableIds: ["t1"], startMin: 21 * 60 + 15, endMin: 22 * 60, blockedMin: 22 * 60 + 15 });
+    const a2 = res({ id: "a2", tableIds: ["t1"], startMin: 19 * 60, endMin: 21 * 60, blockedMin: 21 * 60 + 10 });
+    expect(evaluateMove(a2, ["t2"], [a2, b, afterA], tables)).toMatchObject({ kind: "blocked" });
+  });
+});
+
+describe("Verspätung nur in der Vergangenheit", () => {
+  it("zeigt bei Blick in die Zukunft 'erwartet' statt 'verspätet'", () => {
+    const evening = res({ id: "a" });
+    expect(tableSnapshot([evening], 19 * 60 + 30, 15 * 60).state).toBe("expected");
+    expect(tableSnapshot([evening], 19 * 60 + 30, 19 * 60 + 40).state).toBe("late");
+    expect(tableSnapshot([evening], 19 * 60 + 30, Number.POSITIVE_INFINITY).state).toBe("late");
   });
 });

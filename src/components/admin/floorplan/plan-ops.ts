@@ -1,4 +1,4 @@
-import { areaAt, findFreeSpot, isUnplaced, sanitizeArea, sanitizeTable, tableCenter, type PlanArea, type PlanTable } from "@/lib/floorplan";
+import { areaAt, findFreeSpot, isUnplaced, nearestFreeSpot, sanitizeArea, sanitizeTable, tableCenter, type PlanArea, type PlanTable } from "@/lib/floorplan";
 
 /** Zustand des Editors und reine Änderungsfunktionen (gemeinsam für Zeichenfläche und Seitenleiste). */
 export interface Plan {
@@ -75,4 +75,91 @@ export function placeTable(p: Plan, id: string, areaId?: string): Plan {
   const others = p.tables.filter((x) => x.id !== id && !isUnplaced(x));
   const spot = findFreeSpot(area, t, others);
   return updateTable(p, id, (x) => ({ ...x, ...spot, areaId: area.id }));
+}
+
+// ─── Tische anlegen, duplizieren, löschen ──────────────────────────────────
+
+/** Neue Tische tragen bis zum Speichern eine temporäre ID (Server vergibt die echte). */
+export const NEW_TABLE_PREFIX = "newt:";
+
+export type PresetKey = "2round" | "2square" | "4rect" | "4round" | "6rect" | "8rect";
+
+/** Vorlagen für die Tischleiste: Form, Größe (Planpunkte) und Plätze. */
+export const TABLE_PRESETS: Record<PresetKey, { shape: PlanTable["shape"]; width: number; height: number; min: number; max: number }> = {
+  "2round": { shape: "ROUND", width: 70, height: 70, min: 1, max: 2 },
+  "2square": { shape: "SQUARE", width: 70, height: 70, min: 1, max: 2 },
+  "4rect": { shape: "RECT", width: 110, height: 80, min: 2, max: 4 },
+  "4round": { shape: "ROUND", width: 100, height: 100, min: 2, max: 4 },
+  "6rect": { shape: "RECT", width: 160, height: 80, min: 4, max: 6 },
+  "8rect": { shape: "RECT", width: 220, height: 90, min: 6, max: 8 },
+};
+
+/**
+ * Nächster freier Tischname: Bei Zahlen-Namen ("1", "2", …) die nächste Zahl,
+ * sonst "T1", "T2", … Belegte Namen (auch deaktivierter Tische) werden übersprungen.
+ */
+export function nextTableName(tables: Pick<PlanTable, "name">[], taken: string[] = []): string {
+  const used = new Set([...tables.map((t) => t.name.toLocaleLowerCase("de")), ...taken.map((n) => n.toLocaleLowerCase("de"))]);
+  const numeric = tables.map((t) => Number(t.name)).filter((n) => Number.isInteger(n) && n > 0);
+  let n = numeric.length ? Math.max(...numeric) + 1 : tables.length + 1;
+  const make = (k: number) => (numeric.length ? String(k) : `T${k}`);
+  while (used.has(make(n).toLocaleLowerCase("de"))) n++;
+  return make(n);
+}
+
+/**
+ * Tisch aus Vorlage anlegen – an einem Punkt (Ablegen aus der Leiste) oder am
+ * nächsten freien Platz im Bereich. Liefert den neuen Plan und die ID.
+ */
+export function addTable(
+  p: Plan,
+  preset: PresetKey,
+  opts: { areaId?: string; at?: { x: number; y: number }; id?: string; taken?: string[] } = {},
+): { plan: Plan; id: string } | null {
+  const spec = TABLE_PRESETS[preset];
+  const atArea = opts.at ? areaAt(p.areas, opts.at) : null;
+  const area = atArea ?? p.areas.find((a) => a.id === opts.areaId) ?? p.areas[0];
+  if (!area) return null;
+  const id = opts.id ?? `${NEW_TABLE_PREFIX}${crypto.randomUUID()}`;
+  const base: PlanTable = {
+    id,
+    name: nextTableName(p.tables, opts.taken),
+    areaId: area.id,
+    x: 0,
+    y: 0,
+    width: spec.width,
+    height: spec.height,
+    rotation: 0,
+    shape: spec.shape,
+    minCapacity: spec.min,
+    maxCapacity: spec.max,
+    active: true,
+    onlineBookable: true,
+  };
+  const others = p.tables.filter((t) => !isUnplaced(t));
+  // Ablegen: möglichst am Ablegepunkt, aber nicht auf einem anderen Tisch
+  const spot = opts.at ? nearestFreeSpot(area, base, others, opts.at) : findFreeSpot(area, base, others);
+  const table = sanitizeTable({ ...base, ...spot });
+  return { plan: { ...p, tables: [...p.tables, isUnplaced(table) ? { ...table, x: 1 } : table] }, id };
+}
+
+/** Kopie neben dem Original (gleiche Form, Größe und Plätze, neuer Name). */
+export function duplicateTable(p: Plan, id: string, opts: { id?: string; taken?: string[] } = {}): { plan: Plan; id: string } | null {
+  const src = p.tables.find((t) => t.id === id);
+  const area = src && p.areas.find((a) => a.id === src.areaId);
+  if (!src || !area) return null;
+  const newId = opts.id ?? `${NEW_TABLE_PREFIX}${crypto.randomUUID()}`;
+  const copy: PlanTable = { ...src, id: newId, name: nextTableName(p.tables, opts.taken) };
+  const spot = findFreeSpot(area, copy, p.tables.filter((t) => !isUnplaced(t)));
+  return { plan: { ...p, tables: [...p.tables, sanitizeTable({ ...copy, ...spot })] }, id: newId };
+}
+
+export function deleteTable(p: Plan, id: string): Plan {
+  return p.tables.some((t) => t.id === id) ? { ...p, tables: p.tables.filter((t) => t.id !== id) } : p;
+}
+
+/** Bereich entfernen – nur wenn keine Tische mehr darin stehen. */
+export function deleteArea(p: Plan, id: string): Plan {
+  if (p.tables.some((t) => t.areaId === id) || p.areas.length <= 1) return p;
+  return { ...p, areas: p.areas.filter((a) => a.id !== id) };
 }

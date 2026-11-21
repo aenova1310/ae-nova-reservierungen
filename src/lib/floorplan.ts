@@ -28,6 +28,8 @@ export interface PlanTable {
   minCapacity: number;
   maxCapacity: number;
   active: boolean;
+  /** Online buchbar (Widget). Fehlt bei Ansichten, die es nicht brauchen. */
+  onlineBookable?: boolean;
 }
 
 export interface PlanArea {
@@ -107,6 +109,40 @@ export function findFreeSpot(
   }
   // Kein Platz frei: in die Mitte legen (sichtbar überlappend statt unsichtbar)
   return { x: snap(area.x + area.width / 2 - size.width / 2), y: snap(area.y + area.height / 2 - size.height / 2) };
+}
+
+/**
+ * Nächster freier Platz um einen Wunschpunkt (Mitte des Tisches), z. B. beim
+ * Ablegen aus der Tischleiste: sucht in Ringen nach außen, bleibt im Bereich.
+ * Liefert die linke obere Ecke; ist nichts frei, die Wunschposition.
+ */
+export function nearestFreeSpot(
+  area: Pick<PlanArea, "x" | "y" | "width" | "height">,
+  size: { width: number; height: number },
+  tables: Pick<PlanTable, "x" | "y" | "width" | "height" | "rotation">[],
+  at: { x: number; y: number },
+  gap = 16,
+): { x: number; y: number } {
+  const fits = (x: number, y: number) =>
+    x >= area.x && y >= area.y && x + size.width <= area.x + area.width && y + size.height <= area.y + area.height &&
+    tables.every((t) => {
+      const b = rotatedBounds(t);
+      return x + size.width + gap <= b.x || b.x + b.width + gap <= x || y + size.height + gap <= b.y || b.y + b.height + gap <= y;
+    });
+  const want = { x: snap(at.x - size.width / 2), y: snap(at.y - size.height / 2) };
+  const step = GRID * 2;
+  for (let r = 0; r <= 40; r++) {
+    const ring: { x: number; y: number }[] = [];
+    for (let i = -r; i <= r; i++) {
+      ring.push({ x: want.x + i * step, y: want.y - r * step }, { x: want.x + i * step, y: want.y + r * step });
+      ring.push({ x: want.x - r * step, y: want.y + i * step }, { x: want.x + r * step, y: want.y + i * step });
+    }
+    // Innerhalb eines Rings den Platz nehmen, der dem Wunschpunkt am nächsten liegt
+    ring.sort((a, b) => Math.hypot(a.x - want.x, a.y - want.y) - Math.hypot(b.x - want.x, b.y - want.y));
+    const hit = ring.find((c) => fits(c.x, c.y));
+    if (hit) return hit;
+  }
+  return want;
 }
 
 /** Leinwandgröße: alles sichtbar plus Rand, mindestens 1000 × 640. */

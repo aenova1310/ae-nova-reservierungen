@@ -11,7 +11,6 @@ const NAV: NavItem[] = [
   { href: "", label: "nav.today", icon: "today" },
   { href: "/tischplan", label: "nav.live", icon: "live" },
   { href: "/reservierungen", label: "nav.reservations", icon: "list" },
-  { href: "/timeline", label: "nav.timeline", icon: "timeline" },
   { href: "/statistik", label: "nav.stats", icon: "stats" },
   { href: "/tische", label: "nav.tables", icon: "tables" },
   { href: "/raumplan", label: "nav.floorplan", icon: "floorplan" },

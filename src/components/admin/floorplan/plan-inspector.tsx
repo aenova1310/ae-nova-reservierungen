@@ -1,6 +1,6 @@
 "use client";
 
-import { RotateCcw, RotateCw, Trash2 } from "lucide-react";
+import { Copy, RotateCcw, RotateCw, Trash2 } from "lucide-react";
 import { useId, useState, type ReactNode } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { useAdminT } from "@/components/admin/i18n-provider";
 import { AREA_COLORS, normalizeRotation, tableCenter, type PlanArea, type PlanTable, type TableShape } from "@/lib/floorplan";
 import { cn } from "@/lib/utils";
-import { placeTable, updateArea, updateTable, type Plan, type Selection } from "./plan-ops";
+import { NEW_TABLE_PREFIX, placeTable, updateArea, updateTable, type Plan, type Selection } from "./plan-ops";
 
 /**
  * Seitenleiste des Raumplans: Eigenschaften der Auswahl als Formularfelder.
@@ -25,6 +25,9 @@ interface Props {
   onSelect: (s: Selection) => void;
   isNewArea: (id: string) => boolean;
   rotateStep: number;
+  /** Gewählten Tisch duplizieren bzw. gewählten Tisch/Bereich entfernen. */
+  onDuplicate: () => void;
+  onDelete: () => void;
 }
 
 const SHAPES: TableShape[] = ["RECT", "SQUARE", "ROUND"];
@@ -82,7 +85,7 @@ function Panel({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function TablePanel({ table, plan, commit, rotateStep }: { table: PlanTable } & Pick<Props, "plan" | "commit" | "rotateStep">) {
+function TablePanel({ table, plan, commit, rotateStep, onDuplicate, onDelete, isNewTable }: { table: PlanTable; isNewTable: boolean } & Pick<Props, "plan" | "commit" | "rotateStep" | "onDuplicate" | "onDelete">) {
   const { t } = useAdminT();
   const areaSelect = useId();
   const update = (fn: (x: PlanTable) => PlanTable) => commit(setTable(table.id, fn));
@@ -95,12 +98,29 @@ function TablePanel({ table, plan, commit, rotateStep }: { table: PlanTable } & 
   const area = plan.areas.find((a) => a.id === table.areaId);
   return (
     <Panel title={t("fp.tableTitle", { name: table.name })}>
-      <p className="text-sm text-muted-foreground">
-        {t("fp.persons", { capacity: table.minCapacity === table.maxCapacity ? table.maxCapacity : `${table.minCapacity}–${table.maxCapacity}` })}
-        {table.active ? "" : ` · ${t("fp.inactive")}`}
-        <br />
-        {t("fp.editTablesHint")}
-      </p>
+      <AreaNameField key={table.name} label={t("fp.tableName")} maxLength={30} name={table.name} onCommit={(name) => update((x) => ({ ...x, name }))} />
+      <div className="grid grid-cols-2 gap-3">
+        <NumberField
+          label={t("fp.seatsMin")}
+          value={table.minCapacity}
+          onCommit={(v) => {
+            const min = Math.min(50, Math.max(1, Math.round(v)));
+            update((x) => ({ ...x, minCapacity: min, maxCapacity: Math.max(min, x.maxCapacity) }));
+          }}
+        />
+        <NumberField
+          label={t("fp.seatsMax")}
+          value={table.maxCapacity}
+          onCommit={(v) => {
+            const max = Math.min(50, Math.max(1, Math.round(v)));
+            update((x) => ({ ...x, maxCapacity: max, minCapacity: Math.min(max, x.minCapacity) }));
+          }}
+        />
+      </div>
+      <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={table.onlineBookable ?? true} onChange={(e) => update((x) => ({ ...x, onlineBookable: e.target.checked }))} />
+        {t("fp.onlineBookable")}
+      </label>
 
       <fieldset>
         <legend className="mb-1.5 text-xs text-muted-foreground">{t("fp.shape")}</legend>
@@ -172,28 +192,37 @@ function TablePanel({ table, plan, commit, rotateStep }: { table: PlanTable } & 
           {area ? t("fp.areaChangeHint") : null} {t("fp.areaDragHint")}
         </p>
       </div>
+      <div className="flex flex-wrap gap-2 border-t pt-4">
+        <Button type="button" variant="outline" size="sm" onClick={onDuplicate}>
+          <Copy /> {t("fp.duplicate")}
+        </Button>
+        <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
+          <Trash2 /> {t("fp.deleteTable")}
+        </Button>
+        {!isNewTable ? <p className="w-full text-xs text-muted-foreground">{t("fp.deleteHint")}</p> : null}
+      </div>
     </Panel>
   );
 }
 
-function AreaNameField({ name: initial, onCommit }: { name: string; onCommit: (name: string) => void }) {
+function AreaNameField({ name: initial, onCommit, label, maxLength = 60 }: { name: string; onCommit: (name: string) => void; label?: string; maxLength?: number }) {
   const { t } = useAdminT();
   const id = useId();
   const [name, setName] = useState(initial);
   const apply = () => {
-    const v = name.trim().slice(0, 60);
+    const v = name.trim().slice(0, maxLength);
     if (!v) return setName(initial);
     if (v !== initial) onCommit(v);
   };
   return (
     <div className="space-y-1">
       <Label htmlFor={id} className="text-xs text-muted-foreground">
-        {t("fp.name")}
+        {label ?? t("fp.name")}
       </Label>
       <Input
         id={id}
         value={name}
-        maxLength={60}
+        maxLength={maxLength}
         onChange={(e) => setName(e.target.value)}
         onBlur={apply}
         onKeyDown={(e) => {
@@ -208,7 +237,7 @@ function AreaNameField({ name: initial, onCommit }: { name: string; onCommit: (n
   );
 }
 
-function AreaPanel({ area: a, plan, commit, onSelect, isNewArea }: { area: PlanArea } & Pick<Props, "plan" | "commit" | "onSelect" | "isNewArea">) {
+function AreaPanel({ area: a, plan, commit, onDelete }: { area: PlanArea } & Pick<Props, "plan" | "commit" | "onDelete">) {
   const { t } = useAdminT();
   const update = (fn: (a: PlanArea) => PlanArea) => commit(setArea(a.id, fn));
   const tableCount = plan.tables.filter((x) => x.areaId === a.id).length;
@@ -235,20 +264,12 @@ function AreaPanel({ area: a, plan, commit, onSelect, isNewArea }: { area: PlanA
       <p className="text-sm text-muted-foreground">
         {t("fp.tableCount", { count: tableCount })}. {t("fp.areaMoveHint")}
       </p>
-      {isNewArea(a.id) && tableCount === 0 ? (
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={() => {
-            commit((p) => ({ ...p, areas: p.areas.filter((x) => x.id !== a.id) }));
-            onSelect(null);
-          }}
-        >
+      {tableCount === 0 && plan.areas.length > 1 ? (
+        <Button type="button" variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={onDelete}>
           <Trash2 /> {t("fp.removeArea")}
         </Button>
-      ) : !isNewArea(a.id) ? (
-        <p className="text-xs text-muted-foreground">{t("fp.areaManageHint")}</p>
+      ) : tableCount > 0 ? (
+        <p className="text-xs text-muted-foreground">{t("fp.removeAreaEmptyOnly")}</p>
       ) : null}
     </Panel>
   );
@@ -259,7 +280,7 @@ export function PlanInspector(props: Props) {
   const { t } = useAdminT();
   return (
     <aside className="w-full shrink-0 space-y-4 xl:sticky xl:top-4 xl:w-80" aria-label={t("fp.properties")} inert={props.disabled}>
-      {table ? <TablePanel table={table} {...props} /> : null}
+      {table ? <TablePanel table={table} isNewTable={table.id.startsWith(NEW_TABLE_PREFIX)} {...props} /> : null}
       {area ? <AreaPanel area={area} {...props} /> : null}
       {!table && !area ? (
         <Panel title={t("fp.selection")}>

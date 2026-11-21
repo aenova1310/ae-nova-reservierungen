@@ -9,7 +9,11 @@ export type ReservationErrorCode =
   | "INVALID_TRANSITION"
   | "CONSENT_REQUIRED"
   | "RESTAURANT_SUSPENDED"
-  | "CONFLICT";
+  | "CONFLICT"
+  /** Verschieben: Zieltische haben zusammen zu wenige Plätze (Bestätigung nötig). */
+  | "CAPACITY"
+  /** Verschieben: Reservierung in diesem Status nicht verschiebbar. */
+  | "NOT_MOVABLE";
 
 /** Fachlicher Fehler mit stabilem Code – wird von der API in HTTP-Status übersetzt. */
 export class ReservationError extends Error {

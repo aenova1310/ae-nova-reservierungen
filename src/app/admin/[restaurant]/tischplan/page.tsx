@@ -21,6 +21,8 @@ export default async function LivePlanPage(props: PageProps<"/admin/[restaurant]
   const date = typeof sp.date === "string" && isLocalDate(sp.date) ? sp.date : today;
   const data = await loadLivePlan(tdb, restaurant, date);
   const dateLabel = formatDateLong(dayBounds(date, tz).from, locale, tz);
+  // Gewählte Ansicht beim Tageswechsel beibehalten
+  const keep = sp.ansicht === "zeitleiste" ? "&ansicht=zeitleiste" : "";
 
   return (
     <>
@@ -30,19 +32,25 @@ export default async function LivePlanPage(props: PageProps<"/admin/[restaurant]
         actions={
           <div className="flex items-center gap-1">
             <Button asChild variant="outline" size="sm" aria-label={t("res.prevDay")}>
-              <Link href={`?date=${addDaysToDate(date, -1)}`}>‹</Link>
+              <Link href={`?date=${addDaysToDate(date, -1)}${keep}`}>‹</Link>
             </Button>
             <Button asChild variant={date === today ? "secondary" : "outline"} size="sm">
-              <Link href="?">{t("res.today.title")}</Link>
+              <Link href={`?${keep.slice(1)}`}>{t("res.today.title")}</Link>
             </Button>
             <Button asChild variant="outline" size="sm" aria-label={t("res.nextDay")}>
-              <Link href={`?date=${addDaysToDate(date, 1)}`}>›</Link>
+              <Link href={`?date=${addDaysToDate(date, 1)}${keep}`}>›</Link>
             </Button>
           </div>
         }
       />
       {/* key: beim Tageswechsel Auswahl und Uhrzeit zurücksetzen */}
-      <LivePlan key={date} slug={slug} data={data} canEditPlan={hasFeature(restaurant.planCode, "floorplanEditor")} />
+      <LivePlan
+        key={date}
+        slug={slug}
+        data={data}
+        canEditPlan={hasFeature(restaurant.planCode, "floorplanEditor")}
+        initialView={sp.ansicht === "zeitleiste" ? "timeline" : "room"}
+      />
     </>
   );
 }

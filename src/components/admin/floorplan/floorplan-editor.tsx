@@ -1,7 +1,8 @@
 "use client";
 
-import { Grid3x3, Minus, Plus, Redo2, Undo2 } from "lucide-react";
-import { useCallback, useEffect, useId, useMemo, useReducer, useRef, useState, useTransition, type KeyboardEvent, type PointerEvent } from "react";
+import { BookOpen, Grid3x3, Minus, Plus, Redo2, Undo2 } from "lucide-react";
+import Link from "next/link";
+import { useCallback, useEffect, useEffectEvent, useId, useMemo, useReducer, useRef, useState, useSyncExternalStore, useTransition, type KeyboardEvent, type PointerEvent } from "react";
 import { toast } from "sonner";
 import { saveFloorplanAction } from "@/app/admin/[restaurant]/raumplan/actions";
 import { useAdminT } from "@/components/admin/i18n-provider";
@@ -24,7 +25,23 @@ import { historyReducer, initHistory } from "@/lib/history";
 import type { AdminT } from "@/i18n/admin";
 import { cn } from "@/lib/utils";
 import { PlanInspector } from "./plan-inspector";
-import { NEW_AREA_PREFIX, moveArea, reassignArea, updateArea, updateTable, type Plan, type Selection } from "./plan-ops";
+import {
+  NEW_AREA_PREFIX,
+  NEW_TABLE_PREFIX,
+  addTable,
+  deleteArea,
+  deleteTable,
+  duplicateTable,
+  moveArea,
+  nextTableName,
+  reassignArea,
+  updateArea,
+  updateTable,
+  type Plan,
+  type PresetKey,
+  type Selection,
+} from "./plan-ops";
+import { PresetIcon, TablePalette } from "./table-palette";
 import { AreaLabel, AreaShapeSvg, TableLabel, TableShapeSvg } from "./plan-shapes";
 
 type Point = { x: number; y: number };
@@ -43,7 +60,44 @@ function describeTable(tr: AdminT, t: PlanTable, areas: PlanArea[]) {
   return tr("fp.describeTable", { name: t.name, seats: t.maxCapacity, area, x: Math.round(t.x), y: Math.round(t.y), rotation: t.rotation });
 }
 
-export function FloorplanEditor({ slug, initial, version: initialVersion }: { slug: string; initial: Plan; version: string }) {
+/** Anleitung ein-/ausblenden – pro Browser gemerkt (nur Komfort, kein Datenspeicher). */
+const GUIDE_KEY = "nova.raumplan.anleitung";
+const guideListeners = new Set<() => void>();
+function readGuideHidden() {
+  try {
+    return window.localStorage.getItem(GUIDE_KEY) === "aus";
+  } catch {
+    return false;
+  }
+}
+function setGuideHidden(hidden: boolean) {
+  try {
+    if (hidden) window.localStorage.setItem(GUIDE_KEY, "aus");
+    else window.localStorage.removeItem(GUIDE_KEY);
+  } catch {
+    /* privater Modus o. Ä. – dann eben nur für diese Sitzung */
+  }
+  guideListeners.forEach((l) => l());
+}
+const subscribeGuide = (l: () => void) => {
+  guideListeners.add(l);
+  return () => guideListeners.delete(l);
+};
+
+type PaletteDrag = { preset: PresetKey; x: number; y: number; startX: number; startY: number; active: boolean };
+
+export function FloorplanEditor({
+  slug,
+  initial,
+  version: initialVersion,
+  takenNames = [],
+}: {
+  slug: string;
+  initial: Plan;
+  version: string;
+  /** Namen deaktivierter Tische – für neue Tische nicht vergeben. */
+  takenNames?: string[];
+}) {
   const { t } = useAdminT();
   const [history, dispatch] = useReducer(historyReducer<Plan>, initial, initHistory);
   const plan = history.present;
@@ -60,6 +114,14 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
   const drag = useRef<Drag | null>(null);
   const helpId = useId();
   const dirty = plan !== saved;
+  const guideHidden = useSyncExternalStore(subscribeGuide, readGuideHidden, () => false);
+  const [paletteDrag, setPaletteDragState] = useState<PaletteDrag | null>(null);
+  const paletteDragRef = useRef<PaletteDrag | null>(null);
+  const suppressPaletteClick = useRef(false);
+  const setPaletteDrag = (d: PaletteDrag | null) => {
+    paletteDragRef.current = d;
+    setPaletteDragState(d);
+  };
 
   const placed = plan.tables.filter((t) => !isUnplaced(t));
   const unplaced = plan.tables.filter(isUnplaced);
@@ -85,25 +147,6 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
   const undo = useCallback(() => dispatch({ type: "undo" }), []);
   const redo = useCallback(() => dispatch({ type: "redo" }), []);
 
-  // Tastenkürzel für den ganzen Editor; Eingabefelder behalten ihr eigenes Rückgängig
-  useEffect(() => {
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      if (saving) return;
-      if (target.closest("input, textarea, select, [contenteditable]")) return;
-      const mod = e.ctrlKey || e.metaKey;
-      if (mod && e.key.toLowerCase() === "z") {
-        e.preventDefault();
-        if (e.shiftKey) redo();
-        else undo();
-      } else if (mod && e.key.toLowerCase() === "y") {
-        e.preventDefault();
-        redo();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [undo, redo, saving]);
 
   // Ungespeicherte Änderungen: Warnung beim Schließen und bei Links innerhalb der App
   useEffect(() => {
@@ -248,6 +291,103 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
 
   // ─── Aktionen ────────────────────────────────────────────────────────────
 
+  /** Zielbereich für neue Tische: der gewählte bzw. der des gewählten Tisches, sonst der erste. */
+  const targetAreaId = () =>
+    selection?.kind === "area" ? selection.id : selection?.kind === "table" ? plan.tables.find((x) => x.id === selection.id)?.areaId : plan.areas[0]?.id;
+
+  const addPreset = (preset: PresetKey, at?: Point) => {
+    if (plan.areas.length === 0) return;
+    const id = `${NEW_TABLE_PREFIX}${crypto.randomUUID()}`;
+    const name = nextTableName(plan.tables, takenNames);
+    const areaId = targetAreaId();
+    commit((p) => addTable(p, preset, { id, at, areaId, taken: takenNames })?.plan ?? p);
+    setSelection({ kind: "table", id });
+    setAnnounce(t("fp.added", { name }));
+  };
+
+  const duplicateSelected = () => {
+    const sel = selection;
+    if (sel?.kind !== "table") return;
+    const id = `${NEW_TABLE_PREFIX}${crypto.randomUUID()}`;
+    commit((p) => duplicateTable(p, sel.id, { id, taken: takenNames })?.plan ?? p);
+    setSelection({ kind: "table", id });
+  };
+
+  const deleteSelected = () => {
+    const sel = selection;
+    if (!sel) return;
+    if (sel.kind === "table") commit((p) => deleteTable(p, sel.id));
+    else commit((p) => deleteArea(p, sel.id));
+    setSelection(null);
+  };
+
+  // Tisch aus der Leiste ziehen: am Ablegepunkt anlegen (Klick ohne Bewegung legt frei im Bereich an)
+  const startPaletteDrag = (e: PointerEvent, preset: PresetKey) => {
+    if (e.button !== 0 || saving) return;
+    setPaletteDrag({ preset, x: e.clientX, y: e.clientY, startX: e.clientX, startY: e.clientY, active: false });
+  };
+  /** Ablegen aus der Leiste: nur über der Zeichenfläche. */
+  const onPaletteDrop = useEffectEvent((preset: PresetKey, e: { clientX: number; clientY: number }) => {
+    const rect = svgRef.current?.getBoundingClientRect();
+    if (rect && e.clientX >= rect.left && e.clientX <= rect.right && e.clientY >= rect.top && e.clientY <= rect.bottom) {
+      addPreset(preset, toPlan(e));
+    }
+  });
+  const paletteDragging = paletteDrag !== null;
+  useEffect(() => {
+    if (!paletteDragging) return;
+    const move = (e: globalThis.PointerEvent) => {
+      const d = paletteDragRef.current;
+      if (!d) return;
+      const active = d.active || Math.hypot(e.clientX - d.startX, e.clientY - d.startY) > 6;
+      if (active) setPaletteDrag({ ...d, x: e.clientX, y: e.clientY, active });
+    };
+    const up = (e: globalThis.PointerEvent) => {
+      const d = paletteDragRef.current;
+      setPaletteDrag(null);
+      if (!d?.active) return;
+      suppressPaletteClick.current = true;
+      window.setTimeout(() => (suppressPaletteClick.current = false), 0);
+      onPaletteDrop(d.preset, e);
+    };
+    const abort = () => setPaletteDrag(null);
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    window.addEventListener("pointercancel", abort);
+    return () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      window.removeEventListener("pointercancel", abort);
+    };
+  }, [paletteDragging]);
+
+  // Tastenkürzel für den ganzen Editor; Eingabefelder behalten ihr eigenes Rückgängig
+  const onEditorKey = useEffectEvent((e: globalThis.KeyboardEvent) => {
+    const target = e.target as HTMLElement;
+    if (saving) return;
+    if (target.closest("input, textarea, select, [contenteditable], [role=dialog]")) return;
+    const mod = e.ctrlKey || e.metaKey;
+    if (mod && e.key.toLowerCase() === "z") {
+      e.preventDefault();
+      if (e.shiftKey) redo();
+      else undo();
+    } else if (mod && e.key.toLowerCase() === "y") {
+      e.preventDefault();
+      redo();
+    } else if (mod && e.key.toLowerCase() === "d" && selection?.kind === "table") {
+      e.preventDefault();
+      duplicateSelected();
+    } else if ((e.key === "Delete" || e.key === "Backspace") && selection) {
+      e.preventDefault();
+      deleteSelected();
+    }
+  });
+  useEffect(() => {
+    const onKey = (e: globalThis.KeyboardEvent) => onEditorKey(e);
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const addArea = () => {
     let n = plan.areas.length + 1;
     while (plan.areas.some((a) => a.name === t("fp.newAreaName", { n }))) n++;
@@ -273,15 +413,29 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
       const result = await saveFloorplanAction(slug, {
         baseVersion: version,
         areas: plan.areas,
-        tables: plan.tables.map(({ id, areaId, x, y, width, height, rotation, shape }) => ({ id, areaId, x, y, width, height, rotation, shape })),
+        tables: plan.tables.map(({ id, areaId, x, y, width, height, rotation, shape, name, minCapacity, maxCapacity, onlineBookable }) => ({
+          id,
+          areaId,
+          x,
+          y,
+          width,
+          height,
+          rotation,
+          shape,
+          name,
+          minCapacity,
+          maxCapacity,
+          onlineBookable: onlineBookable ?? true,
+        })),
       });
       if (result?.ok && result.plan) {
-        const next = { areas: result.plan.areas, tables: result.plan.tables };
+        // Editor zeigt nur aktive Tische (gelöschte mit Historie sind jetzt deaktiviert)
+        const next = { areas: result.plan.areas, tables: result.plan.tables.filter((x) => x.active) };
         // Verlauf leeren: alte Schritte enthalten temporäre Bereichs-IDs
         dispatch({ type: "reset", present: next });
         setSaved(next);
         setVersion(result.plan.version);
-        setSelection((s) => (s?.kind === "area" && s.id.startsWith(NEW_AREA_PREFIX) ? null : s));
+        setSelection((s) => (s && (s.id.startsWith(NEW_AREA_PREFIX) || s.id.startsWith(NEW_TABLE_PREFIX)) ? null : s));
         toast.success(result.message ?? t("common.saved"));
       } else if (result && !result.ok) {
         toast.error(result.error);
@@ -334,6 +488,11 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
           <Button type="button" variant="outline" size="sm" onClick={addArea} disabled={saving}>
             <Plus /> {t("fp.addArea")}
           </Button>
+          {guideHidden ? (
+            <Button type="button" variant="ghost" size="sm" onClick={() => setGuideHidden(false)}>
+              <BookOpen /> {t("fp.guide.show")}
+            </Button>
+          ) : null}
           <div className="ml-auto flex items-center gap-2">
             {dirty ? (
               <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -349,6 +508,32 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
             </Button>
           </div>
         </div>
+
+        <TablePalette
+          t={t}
+          disabled={saving || plan.areas.length === 0}
+          onAdd={(preset) => {
+            if (suppressPaletteClick.current) return;
+            addPreset(preset);
+          }}
+          onDragStart={startPaletteDrag}
+        />
+
+        {!guideHidden ? (
+          <div className="flex flex-col gap-3 border-b bg-[#f6f3ec] px-4 py-3 text-sm sm:flex-row sm:items-start">
+            <div className="flex-1">
+              <p className="font-medium">{t("fp.guide.title")}</p>
+              <ol className="mt-1.5 list-decimal space-y-1 pl-5 text-muted-foreground marker:text-foreground">
+                <li>{t("fp.guide.step1")}</li>
+                <li>{t("fp.guide.step2")}</li>
+                <li>{t("fp.guide.step3")}</li>
+              </ol>
+            </div>
+            <Button type="button" variant="ghost" size="sm" onClick={() => setGuideHidden(true)}>
+              {t("fp.guide.hide")}
+            </Button>
+          </div>
+        ) : null}
 
         {/* Während des Speicherns gesperrt: Änderungen in dieser Zeit gingen beim Übernehmen des Ergebnisses verloren */}
         <div ref={scroller} inert={saving} aria-busy={saving} className={cn("max-h-[70vh] overflow-auto bg-[var(--nova-porzellan)]", saving && "opacity-70")}>
@@ -470,9 +655,14 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
             ) : null}
           </svg>
         </div>
-        <p id={helpId} className="border-t px-3 py-2 text-xs text-muted-foreground">
-          {t("fp.help", { step: ROTATE_STEP })}
-        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs text-muted-foreground">
+          <p id={helpId}>
+            {t("fp.help", { step: ROTATE_STEP })} · {t("fp.shortcuts")}
+          </p>
+          <Link href={`/admin/${slug}/tischplan`} className="underline-offset-4 hover:text-foreground hover:underline">
+            {t("fp.toLivePlan")}
+          </Link>
+        </div>
         <p aria-live="polite" className="sr-only">
           {announce}
         </p>
@@ -488,7 +678,15 @@ export function FloorplanEditor({ slug, initial, version: initialVersion }: { sl
         onSelect={setSelection}
         isNewArea={(id) => id.startsWith(NEW_AREA_PREFIX)}
         rotateStep={ROTATE_STEP}
+        onDuplicate={duplicateSelected}
+        onDelete={deleteSelected}
       />
+
+      {paletteDrag?.active ? (
+        <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-1/2 rounded-md bg-card/90 p-1 shadow-lg" style={{ left: paletteDrag.x, top: paletteDrag.y }} aria-hidden>
+          <PresetIcon preset={paletteDrag.preset} size={52} />
+        </div>
+      ) : null}
     </div>
   );
 }

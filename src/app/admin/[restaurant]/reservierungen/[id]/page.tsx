@@ -173,7 +173,7 @@ export default async function ReservationDetailPage(props: PageProps<"/admin/[re
             </Section>
           ) : null}
           <Button asChild variant="ghost" className="w-full">
-            <Link href={`/admin/${slug}/timeline?date=${utcToLocalDate(r.startsAt, tz)}`}>{t("res.detail.showInTimeline")}</Link>
+            <Link href={`/admin/${slug}/tischplan?date=${utcToLocalDate(r.startsAt, tz)}&ansicht=zeitleiste`}>{t("res.detail.showInTimeline")}</Link>
           </Button>
         </aside>
       </div>

@@ -68,7 +68,12 @@ export interface TableSnapshot {
 /** Diese Status belegen einen Tisch (No-Show gibt ihn im Service frei). */
 const OCCUPYING: LiveStatus[] = ["PENDING_PAYMENT", "REQUESTED", "CONFIRMED", "ARRIVED"];
 
-export function tableSnapshot(reservations: LiveReservation[], at: number): TableSnapshot {
+/**
+ * @param realNow Tatsächliche Uhrzeit in Minuten des Tages. "Verspätet" gibt es nur, wenn die
+ *   Zeit wirklich vorbei ist – wer den Regler in die Zukunft stellt, sieht "erwartet".
+ *   Standard: gleich `at` (vergangene Tage: Infinity, künftige: -Infinity übergeben).
+ */
+export function tableSnapshot(reservations: LiveReservation[], at: number, realNow = at): TableSnapshot {
   const relevant = reservations.filter((r) => OCCUPYING.includes(r.status)).sort((a, b) => a.startMin - b.startMin);
   // Eingetroffene Gäste belegen den Tisch, bis sie gehen – auch über die geplante Zeit hinaus
   const current =
@@ -80,12 +85,17 @@ export function tableSnapshot(reservations: LiveReservation[], at: number): Tabl
   if (current) {
     if (current.status === "ARRIVED") return { state: "seated", current, next };
     if (current.status === "REQUESTED" || current.status === "PENDING_PAYMENT") return { state: "requested", current, next };
-    return { state: at >= current.startMin + LATE_AFTER_MIN ? "late" : "expected", current, next };
+    return { state: isLate(current, at, realNow) ? "late" : "expected", current, next };
   }
   const turnover = relevant.find((r) => r.endMin <= at && at < r.blockedMin);
   if (turnover) return { state: "turnover", current: turnover, next };
   if (next && next.startMin - at <= SOON_WITHIN_MIN) return { state: "soon", current: null, next };
   return { state: "free", current: null, next };
+}
+
+/** Bestätigt, aber nicht eingetroffen – und die Verspätung ist zur gewählten wie zur echten Zeit schon da. */
+export function isLate(r: LiveReservation, at: number, realNow: number): boolean {
+  return r.status === "CONFIRMED" && Math.min(at, realNow) >= r.startMin + LATE_AFTER_MIN && at < r.endMin;
 }
 
 /** Wie viele Tische sind je Zeitabschnitt belegt (für die Auslastungskurve über dem Zeitregler)? */
@@ -146,3 +156,58 @@ function autoLayout(areas: PlanArea[], tables: PlanTable[]) {
   }
   return { areas: outAreas, tables: outTables };
 }
+
+// ─── Verschieben auf andere Tische ─────────────────────────────────────────
+
+/** Status, die sich im Service auf andere Tische setzen lassen. */
+export const MOVABLE_STATUSES: LiveStatus[] = ["PENDING_PAYMENT", "REQUESTED", "CONFIRMED", "ARRIVED"];
+
+export type MoveVerdict =
+  | { kind: "same" }
+  /** Zieltische im Zeitraum frei. */
+  | { kind: "free"; seats: number; overCapacity: boolean }
+  /** Genau eine andere Reservierung liegt dort – Tausch möglich. */
+  | { kind: "swap"; seats: number; overCapacity: boolean; other: LiveReservation; otherOverCapacity: boolean; otherTo: string[] }
+  /** Mehrere Überschneidungen oder nicht tauschbar. */
+  | { kind: "blocked"; conflicts: LiveReservation[] };
+
+/**
+ * Bewertet, ob `r` auf `targetIds` passt (Zeitraum inkl. Puffer). Spiegelt die
+ * Prüfung des Servers, damit beim Ziehen sofort die richtige Farbe erscheint;
+ * maßgeblich bleibt der Server (Datenbank-Constraint).
+ */
+export function evaluateMove(
+  r: LiveReservation,
+  targetIds: string[],
+  reservations: LiveReservation[],
+  tables: { id: string; maxCapacity: number }[],
+): MoveVerdict {
+  if (targetIds.length === r.tableIds.length && targetIds.every((id) => r.tableIds.includes(id))) return { kind: "same" };
+  const seatsOf = (ids: string[]) => ids.reduce((s, id) => s + (tables.find((t) => t.id === id)?.maxCapacity ?? 0), 0);
+  const seats = seatsOf(targetIds);
+  const conflicts = reservations.filter(
+    (o) =>
+      o.id !== r.id &&
+      OCCUPYING_FOR_MOVE.includes(o.status) &&
+      o.tableIds.some((id) => targetIds.includes(id)) &&
+      o.startMin < r.blockedMin &&
+      r.startMin < o.blockedMin,
+  );
+  if (conflicts.length === 0) return { kind: "free", seats, overCapacity: seats < r.partySize };
+  const other = conflicts[0];
+  if (conflicts.length === 1 && MOVABLE_STATUSES.includes(other.status)) {
+    // Beim Tausch bekommt die andere Reservierung die bisherigen Tische – die müssen für sie frei sein
+    const otherBlocked = reservations.some(
+      (o) => o.id !== r.id && o.id !== other.id && OCCUPYING_FOR_MOVE.includes(o.status) && o.tableIds.some((id) => r.tableIds.includes(id)) && o.startMin < other.blockedMin && other.startMin < o.blockedMin,
+    );
+    if (!otherBlocked) {
+      // Wie der Server: die andere Reservierung behält ihre übrigen Tische und bekommt die bisherigen dazu
+      const otherTo = [...new Set([...other.tableIds.filter((id) => !targetIds.includes(id)), ...r.tableIds])];
+      return { kind: "swap", seats, overCapacity: seats < r.partySize, other, otherOverCapacity: seatsOf(otherTo) < other.partySize, otherTo };
+    }
+  }
+  return { kind: "blocked", conflicts };
+}
+
+/** No-Shows belegen den Tisch in der Datenbank weiter, bis er freigegeben wird. */
+const OCCUPYING_FOR_MOVE: LiveStatus[] = ["PENDING_PAYMENT", "REQUESTED", "CONFIRMED", "ARRIVED", "NO_SHOW"];
