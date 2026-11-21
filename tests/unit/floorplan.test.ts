@@ -11,7 +11,7 @@ import {
   type PlanArea,
   type PlanTable,
 } from "@/lib/floorplan";
-import { moveArea, updateArea, updateTable } from "@/components/admin/floorplan/plan-ops";
+import { addTable, deleteArea, deleteTable, duplicateTable, moveArea, nextTableName, updateArea, updateTable } from "@/components/admin/floorplan/plan-ops";
 import { HISTORY_LIMIT, historyReducer, initHistory } from "@/lib/history";
 
 const area = (id: string, x: number, y: number, width: number, height: number): PlanArea => ({ id, name: id, x, y, width, height, color: null });
@@ -134,5 +134,37 @@ describe("Änderungsfunktionen des Editors", () => {
     const plan = { areas: [area("a", 20, 20, 400, 300)], tables: [table({ x: 20, y: 20 })] };
     expect(updateTable(plan, "t", (t) => ({ ...t, x: -5, y: -5 })).tables[0]).toMatchObject({ x: 1, y: 0 });
     expect(moveArea(plan, "a", 0, 0).tables[0]).toMatchObject({ x: 1, y: 0 });
+  });
+});
+
+describe("Tische im Editor anlegen", () => {
+  const plan = () => ({ areas: [area("a", 0, 0, 600, 400), area("b", 700, 0, 300, 300)], tables: [table({ id: "t1", name: "1", x: 40, y: 40 })] });
+
+  it("vergibt den nächsten freien Namen", () => {
+    expect(nextTableName([{ name: "1" }, { name: "7" }])).toBe("8");
+    expect(nextTableName([{ name: "Fenster" }])).toBe("T2");
+    expect(nextTableName([{ name: "1" }], ["2"])).toBe("3");
+  });
+
+  it("legt aus der Vorlage an – frei im Bereich oder am Ablegepunkt", () => {
+    const free = addTable(plan(), "4rect", { id: "n1" })!;
+    const t = free.plan.tables.find((x) => x.id === "n1")!;
+    expect(t).toMatchObject({ name: "2", shape: "RECT", width: 110, height: 80, minCapacity: 2, maxCapacity: 4, areaId: "a" });
+    const dropped = addTable(plan(), "2round", { id: "n2", at: { x: 800, y: 100 } })!;
+    expect(dropped.plan.tables.find((x) => x.id === "n2")).toMatchObject({ areaId: "b", x: 770, y: 70 });
+    // Auf einen vorhandenen Tisch abgelegt → rutscht daneben
+    const onTop = addTable(plan(), "2round", { id: "n3", at: { x: 80, y: 80 } })!;
+    const placed = onTop.plan.tables.find((x) => x.id === "n3")!;
+    expect(placed.areaId).toBe("a");
+    expect(placed.x >= 40 + 80 + 16 || placed.y >= 40 + 60 + 16).toBe(true);
+  });
+
+  it("dupliziert, löscht Tische und entfernt nur leere Bereiche", () => {
+    const dup = duplicateTable(plan(), "t1", { id: "c" })!;
+    expect(dup.plan.tables).toHaveLength(2);
+    expect(dup.plan.tables[1]).toMatchObject({ name: "2", width: 80, areaId: "a" });
+    expect(deleteTable(dup.plan, "c").tables).toHaveLength(1);
+    expect(deleteArea(plan(), "a").areas).toHaveLength(2); // nicht leer
+    expect(deleteArea(plan(), "b").areas.map((x) => x.id)).toEqual(["a"]);
   });
 });

@@ -74,7 +74,7 @@ export default async function TodayPage(props: PageProps<"/admin/[restaurant]">)
 
       <div className="mb-3 flex items-baseline justify-between">
         <h2 className="font-medium">{t("res.today.next")}</h2>
-        <Link href={`/admin/${slug}/timeline`} className="text-sm text-muted-foreground underline-offset-4 hover:underline">
+        <Link href={`/admin/${slug}/tischplan`} className="text-sm text-muted-foreground underline-offset-4 hover:underline">
           {t("res.today.viewTimeline")}
         </Link>
       </div>

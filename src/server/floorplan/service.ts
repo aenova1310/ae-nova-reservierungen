@@ -4,6 +4,7 @@ import { z } from "zod";
 import { msg } from "@/i18n/admin";
 import { sanitizeArea, sanitizeTable, type PlanArea, type PlanTable } from "@/lib/floorplan";
 import { db, type Tx } from "../db";
+import { mediaStorage } from "../media/storage";
 import { UserFacingError } from "../http/admin-action";
 import { requireFeature, type PlanCode } from "../plans/features";
 
@@ -43,6 +44,7 @@ const TABLE_SELECT = {
   rotation: true,
   shape: true,
   minCapacity: true,
+  onlineBookable: true,
   maxCapacity: true,
   active: true,
 } as const;
@@ -72,6 +74,7 @@ async function readPlan(client: Tx | typeof db, restaurantId: string): Promise<F
     rotation: t.rotation,
     shape: t.shape,
     minCapacity: t.minCapacity,
+    onlineBookable: t.onlineBookable,
     maxCapacity: t.maxCapacity,
     active: t.active,
   }));
@@ -122,17 +125,29 @@ const savePayload = z.object({
         height: coord,
         rotation: coord,
         shape: z.enum(["RECT", "SQUARE", "ROUND"]),
+        name: z.string().trim().min(1, msg("fp.v.tableNameMissing")).max(30),
+        minCapacity: z.number().int().min(1, msg("common.v.min", { min: 1 })).max(50, msg("common.v.max", { max: 50 })),
+        maxCapacity: z.number().int().min(1, msg("common.v.min", { min: 1 })).max(50, msg("common.v.max", { max: 50 })),
+        onlineBookable: z.boolean(),
       }),
     )
     .max(500),
 });
-export type FloorplanPayload = z.input<typeof savePayload>;
 
-const sameSet = (a: string[], b: string[]) => a.length === b.length && new Set(a).size === a.length && a.every((id) => b.includes(id));
+/** Neue Tische tragen bis zum Speichern eine temporäre ID mit diesem Präfix. */
+export const NEW_TABLE_PREFIX = "newt:";
+
+const ACTIVE_RESERVATION = ["PENDING_PAYMENT", "REQUESTED", "CONFIRMED", "ARRIVED", "NO_SHOW"] as const;
+export type FloorplanPayload = z.input<typeof savePayload>;
 
 /**
  * Speichert den Plan. Prüft serverseitig Tarif, Zugehörigkeit aller IDs zum
- * Restaurant, Grenzen der Geometrie und eindeutige Bereichsnamen.
+ * Restaurant, Grenzen der Geometrie und eindeutige Namen.
+ *
+ * Der Editor zeigt nur aktive Tische. Fehlt ein aktiver Tisch im Plan, wurde er
+ * gelöscht: ohne Buchungshistorie endgültig (samt Kombinationen und Foto),
+ * mit Historie deaktiviert. Tische mit kommenden Reservierungen lassen sich
+ * nicht löschen – die müssen erst umgesetzt werden. Leere Bereiche ebenso.
  */
 export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, userId: string): Promise<Floorplan> {
   requireFeature(restaurant, "floorplanEditor");
@@ -141,6 +156,11 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
   const names = payload.areas.map((a) => a.name.toLocaleLowerCase("de"));
   const duplicate = payload.areas.find((_, i) => names.indexOf(names[i]) !== i);
   if (duplicate) throw new FloorplanError("fp.err.duplicateArea", { name: duplicate.name });
+  const tableNames = payload.tables.map((t) => t.name.toLocaleLowerCase("de"));
+  const duplicateTable = payload.tables.find((_, i) => tableNames.indexOf(tableNames[i]) !== i);
+  if (duplicateTable) throw new FloorplanError("fp.err.duplicateTable", { name: duplicateTable.name });
+  const badCapacity = payload.tables.find((t) => t.maxCapacity < t.minCapacity);
+  if (badCapacity) throw new FloorplanError("fp.err.capacityOrder", { name: badCapacity.name });
 
   return db.$transaction(async (tx) => {
     // Gleichzeitiges Speichern desselben Plans serialisieren
@@ -150,10 +170,32 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
       throw new FloorplanError("fp.err.changed");
     }
 
-    // Vollständigkeit: genau die vorhandenen Tische und Bereiche, nichts Fremdes
+    // Nur eigene Tische und Bereiche; was fehlt, wurde im Editor gelöscht
     const existingAreaIds = payload.areas.filter((a) => !a.id.startsWith(NEW_AREA_PREFIX)).map((a) => a.id);
-    if (!sameSet(existingAreaIds, current.areas.map((a) => a.id))) throw new FloorplanError("fp.err.areaMismatch");
-    if (!sameSet(payload.tables.map((t) => t.id), current.tables.map((t) => t.id))) throw new FloorplanError("fp.err.tableMismatch");
+    const currentAreaIds = current.areas.map((a) => a.id);
+    if (new Set(existingAreaIds).size !== existingAreaIds.length || !existingAreaIds.every((id) => currentAreaIds.includes(id))) {
+      throw new FloorplanError("fp.err.areaMismatch");
+    }
+    const activeIds = current.tables.filter((t) => t.active).map((t) => t.id);
+    const existingTableIds = payload.tables.filter((t) => !t.id.startsWith(NEW_TABLE_PREFIX)).map((t) => t.id);
+    if (new Set(existingTableIds).size !== existingTableIds.length || !existingTableIds.every((id) => activeIds.includes(id))) {
+      throw new FloorplanError("fp.err.tableMismatch");
+    }
+    // Namen deaktivierter Tische sind weiter belegt (eindeutig je Restaurant)
+    const inactiveName = payload.tables.find((t) =>
+      current.tables.some((c) => !c.active && c.name.toLocaleLowerCase("de") === t.name.toLocaleLowerCase("de")),
+    );
+    if (inactiveName) throw new FloorplanError("fp.err.nameOfInactive", { name: inactiveName.name });
+
+    // Gelöschte Tische: kommende Reservierungen verhindern das Löschen
+    const deletedIds = activeIds.filter((id) => !existingTableIds.includes(id));
+    const busy = deletedIds.length
+      ? await tx.reservationTable.findFirst({
+          where: { tableId: { in: deletedIds }, active: true, blockedUntil: { gt: new Date() }, reservation: { status: { in: [...ACTIVE_RESERVATION] } } },
+          select: { tableId: true },
+        })
+      : null;
+    if (busy) throw new FloorplanError("fp.err.tableHasReservations", { name: current.tables.find((t) => t.id === busy.tableId)?.name ?? "" });
 
     // Umbenennungen zweistufig: erst Platzhalternamen, sonst scheitern Tausch oder
     // Kette ("A→B, B→C") am eindeutigen Namen je Restaurant
@@ -176,25 +218,82 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
       }
     }
 
+    // Gelöschte Tische: mit Historie deaktivieren, sonst entfernen (Kombinationen mit ihnen fallen weg)
+    const mediaKeys: string[] = [];
+    let deactivated = 0;
+    for (const id of deletedIds) {
+      const history = await tx.reservationTable.count({ where: { tableId: id } });
+      if (history > 0) {
+        await tx.table.update({ where: { id, restaurantId: restaurant.id }, data: { active: false, onlineBookable: false } });
+        deactivated++;
+      } else {
+        const media = await tx.tableMedia.findUnique({ where: { tableId: id }, select: { storageKey: true, thumbKey: true } });
+        if (media) mediaKeys.push(media.storageKey, ...(media.thumbKey ? [media.thumbKey] : []));
+        await tx.tableCombination.deleteMany({ where: { restaurantId: restaurant.id, tables: { some: { tableId: id } } } });
+        await tx.table.delete({ where: { id, restaurantId: restaurant.id } });
+      }
+    }
+
+    // Tischnamen ebenfalls zweistufig ändern (Tausch "1" ↔ "2")
+    const renamedTables = payload.tables.filter((t) => !t.id.startsWith(NEW_TABLE_PREFIX) && current.tables.find((c) => c.id === t.id)?.name !== t.name);
+    for (const t of renamedTables) {
+      await tx.table.update({ where: { id: t.id, restaurantId: restaurant.id }, data: { name: `__umbenennen__${t.id}` } });
+    }
+
+    let tableOrder = current.tables.length;
     for (const t of payload.tables) {
       const areaId = idMap.get(t.areaId);
       if (!areaId) throw new FloorplanError("fp.err.unknownArea");
       const geo = sanitizeTable(t);
-      await tx.table.update({
-        where: { id: t.id, restaurantId: restaurant.id },
-        data: { areaId, posX: geo.x, posY: geo.y, width: geo.width, height: geo.height, rotation: geo.rotation, shape: geo.shape },
-      });
+      const data = {
+        areaId,
+        posX: geo.x,
+        posY: geo.y,
+        width: geo.width,
+        height: geo.height,
+        rotation: geo.rotation,
+        shape: geo.shape,
+        name: t.name,
+        minCapacity: t.minCapacity,
+        maxCapacity: t.maxCapacity,
+        onlineBookable: t.onlineBookable,
+      };
+      if (t.id.startsWith(NEW_TABLE_PREFIX)) {
+        await tx.table.create({ data: { ...data, restaurantId: restaurant.id, sortOrder: tableOrder++, active: true } });
+      } else {
+        await tx.table.update({ where: { id: t.id, restaurantId: restaurant.id }, data });
+      }
     }
 
-    const moved = payload.tables.filter((t) => current.tables.find((c) => c.id === t.id)?.areaId !== idMap.get(t.areaId)).length;
+    // Bereiche, die im Editor entfernt wurden – nur wenn keine Tische mehr darin stehen (auch deaktivierte)
+    const removedAreas = currentAreaIds.filter((id) => !existingAreaIds.includes(id));
+    for (const id of removedAreas) {
+      const remaining = await tx.table.count({ where: { areaId: id, restaurantId: restaurant.id } });
+      if (remaining > 0) throw new FloorplanError("fp.err.areaNotEmpty", { name: current.areas.find((a) => a.id === id)?.name ?? "" });
+      await tx.area.delete({ where: { id, restaurantId: restaurant.id } });
+    }
+
+    const moved = payload.tables.filter((t) => !t.id.startsWith(NEW_TABLE_PREFIX) && current.tables.find((c) => c.id === t.id)?.areaId !== idMap.get(t.areaId)).length;
     await tx.auditLog.create({
       data: {
         restaurantId: restaurant.id,
         userId,
         action: "floorplan.saved",
-        meta: { areas: payload.areas.length, newAreas: payload.areas.length - existingAreaIds.length, tablesMovedArea: moved },
+        meta: {
+          areas: payload.areas.length,
+          newAreas: payload.areas.length - existingAreaIds.length,
+          removedAreas: removedAreas.length,
+          newTables: payload.tables.length - existingTableIds.length,
+          deletedTables: deletedIds.length - deactivated,
+          deactivatedTables: deactivated,
+          tablesMovedArea: moved,
+        },
       },
     });
-    return readPlan(tx, restaurant.id);
+    return { plan: await readPlan(tx, restaurant.id), mediaKeys };
+  }).then(async ({ plan, mediaKeys }) => {
+    // Fotos gelöschter Tische erst nach dem Commit entfernen (Fehler nur protokollieren)
+    for (const key of mediaKeys) await mediaStorage().delete(key).catch((e) => console.warn(`[media] Löschen fehlgeschlagen: ${key}`, e));
+    return plan;
   });
 }

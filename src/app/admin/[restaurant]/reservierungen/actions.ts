@@ -9,7 +9,9 @@ import { isLocalDate, isLocalTime } from "@/server/availability/time";
 import { dispatchEmails } from "@/server/email/outbox";
 import { formObject, runAction } from "@/server/http/admin-action";
 import { createReservation } from "@/server/reservations/create";
+import { ReservationError } from "@/server/reservations/errors";
 import { cancelReservation, modifyReservation } from "@/server/reservations/manage";
+import { moveReservationTables } from "@/server/reservations/move";
 import { changeReservationStatus, releaseTablesNow, type ReservationStatus } from "@/server/reservations/status";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 
@@ -111,6 +113,40 @@ export async function updateInternalNotesAction(slug: string, reservationId: str
     refresh(slug);
     return t("res.noteSaved");
   });
+}
+
+export type MoveTablesResult = NonNullable<ActionResult> & { code?: string };
+
+/**
+ * Reservierung auf andere Tische setzen (Ziehen im Tischplan, „Tisch wechseln“).
+ * Liefert bei zu wenigen Plätzen `code: "CAPACITY"`, damit die Oberfläche nachfragen kann.
+ */
+export async function moveTablesAction(
+  slug: string,
+  reservationId: string,
+  toTableIds: string[],
+  opts: { swapWithId?: string | null; allowOverCapacity?: boolean } = {},
+): Promise<MoveTablesResult> {
+  let code: string | undefined;
+  const result = await runAction(async (t) => {
+    const { restaurant, user } = await requireRestaurantAccess(slug);
+    try {
+      const moved = await moveReservationTables({
+        restaurantId: restaurant.id,
+        reservationId,
+        toTableIds: z.array(z.string().min(1).max(64)).min(1).max(8).parse(toTableIds),
+        swapWithId: opts.swapWithId ?? null,
+        allowOverCapacity: opts.allowOverCapacity === true,
+        userId: user.id,
+      });
+      refresh(slug);
+      return moved.swapped ? t("live.move.swapped") : t("live.move.moved");
+    } catch (error) {
+      if (error instanceof ReservationError) code = error.code;
+      throw error;
+    }
+  });
+  return result?.ok ? result : { ...(result ?? { ok: false, error: "" }), code };
 }
 
 export async function releaseTablesAction(slug: string, reservationId: string) {

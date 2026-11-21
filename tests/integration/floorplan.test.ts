@@ -22,9 +22,95 @@ async function payloadFor(restaurantId: string) {
   return {
     baseVersion: plan.version,
     areas: plan.areas,
-    tables: plan.tables.map(({ id, areaId, x, y, width, height, rotation, shape }) => ({ id, areaId, x, y, width, height, rotation, shape })),
+    tables: plan.tables
+      .filter((t) => t.active)
+      .map(({ id, areaId, x, y, width, height, rotation, shape, name, minCapacity, maxCapacity, onlineBookable }) => ({
+        id,
+        areaId,
+        x,
+        y,
+        width,
+        height,
+        rotation,
+        shape,
+        name,
+        minCapacity,
+        maxCapacity,
+        onlineBookable: onlineBookable ?? true,
+      })),
   };
 }
+
+const tableAt = (y: number, over: Record<string, unknown> = {}) => ({
+  x: 100, y, width: 80, height: 80, rotation: 0, shape: "SQUARE" as const, minCapacity: 2, maxCapacity: 4, onlineBookable: true, ...over,
+});
+
+async function bookOn(restaurantId: string, tableId: string, startsAt: Date) {
+  const r = await db.reservation.create({
+    data: { restaurantId, code: Math.random().toString(36).slice(2, 8).toUpperCase(), status: "CONFIRMED", source: "PHONE", partySize: 2, startsAt, endsAt: new Date(startsAt.getTime() + 90 * 60_000) },
+  });
+  await db.reservationTable.create({ data: { restaurantId, reservationId: r.id, tableId, startsAt, blockedUntil: new Date(startsAt.getTime() + 105 * 60_000) } });
+  return r;
+}
+
+describe("Tische im Editor anlegen, ändern, löschen", () => {
+  it("legt neue Tische an und übernimmt Name, Plätze und Online-Buchbarkeit", async () => {
+    const { pro, area, userId } = await setup();
+    const payload = await payloadFor(pro.id);
+    payload.tables.push({ id: "newt:1", areaId: area.id, name: "Fenster 1", ...tableAt(300, { minCapacity: 1, maxCapacity: 2, onlineBookable: false, shape: "ROUND" }) });
+    payload.tables[0] = { ...payload.tables[0], name: "Bar", maxCapacity: 3 };
+    const saved = await saveFloorplan(pro, payload, userId);
+    expect(saved.tables.find((t) => t.name === "Fenster 1")).toMatchObject({ minCapacity: 1, maxCapacity: 2, onlineBookable: false, shape: "ROUND", active: true });
+    expect(saved.tables.find((t) => t.name === "Bar")).toMatchObject({ maxCapacity: 3 });
+    expect(saved.tables.some((t) => t.id.startsWith("newt:"))).toBe(false);
+  });
+
+  it("tauscht Tischnamen ohne Konflikt und prüft die Reihenfolge der Plätze", async () => {
+    const { pro, userId } = await setup();
+    const payload = await payloadFor(pro.id);
+    const [a, b] = payload.tables;
+    payload.tables = [{ ...a, name: b.name }, { ...b, name: a.name }];
+    const saved = await saveFloorplan(pro, payload, userId);
+    expect(saved.tables.find((t) => t.id === a.id)?.name).toBe(b.name);
+    const bad = await payloadFor(pro.id);
+    bad.tables[0] = { ...bad.tables[0], minCapacity: 5, maxCapacity: 2 };
+    await expect(saveFloorplan(pro, bad, userId)).rejects.toThrow("fp.err.capacityOrder");
+  });
+
+  it("löscht Tische ohne Historie, deaktiviert Tische mit Historie, schützt kommende Reservierungen", async () => {
+    const { pro, tables, userId } = await setup();
+    const [t1, t2] = tables;
+    // T1: Buchung in der Vergangenheit → wird deaktiviert; T2: ohne Historie → wird gelöscht
+    await bookOn(pro.id, t1.id, new Date(Date.now() - 3 * 86_400_000));
+    const payload = await payloadFor(pro.id);
+    const saved = await saveFloorplan(pro, { ...payload, tables: [] }, userId);
+    expect(saved.tables.find((t) => t.id === t1.id)).toMatchObject({ active: false });
+    expect(saved.tables.find((t) => t.id === t2.id)).toBeUndefined();
+
+    // Name eines deaktivierten Tisches ist weiter belegt
+    const again = await payloadFor(pro.id);
+    again.tables.push({ id: "newt:x", areaId: again.areas[0].id, name: t1.name, ...tableAt(100) });
+    await expect(saveFloorplan(pro, again, userId)).rejects.toThrow("fp.err.nameOfInactive");
+  });
+
+  it("verhindert das Löschen bei kommenden Reservierungen", async () => {
+    const { pro, tables, userId } = await setup();
+    await bookOn(pro.id, tables[0].id, new Date(Date.now() + 2 * 86_400_000));
+    const payload = await payloadFor(pro.id);
+    await expect(saveFloorplan(pro, { ...payload, tables: payload.tables.slice(1) }, userId)).rejects.toThrow("fp.err.tableHasReservations");
+    expect(await db.table.count({ where: { id: tables[0].id, active: true } })).toBe(1);
+  });
+
+  it("entfernt nur leere Bereiche", async () => {
+    const { pro, userId } = await setup();
+    await db.area.create({ data: { restaurantId: pro.id, name: "Leer" } });
+    const payload = await payloadFor(pro.id);
+    const saved = await saveFloorplan(pro, { ...payload, areas: payload.areas.filter((a) => a.name !== "Leer") }, userId);
+    expect(saved.areas.map((a) => a.name)).not.toContain("Leer");
+    const p2 = await payloadFor(pro.id);
+    await expect(saveFloorplan(pro, { ...p2, areas: [], tables: p2.tables }, userId)).rejects.toThrow();
+  });
+});
 
 describe("Raumplan speichern", () => {
   it("ist im Basic-Tarif serverseitig gesperrt", async () => {
@@ -82,10 +168,11 @@ describe("Raumplan speichern", () => {
     expect(await db.auditLog.count()).toBe(0);
   });
 
-  it("verlangt den vollständigen Plan und eindeutige Bereichsnamen", async () => {
+  it("verlangt eindeutige Namen", async () => {
     const { pro, userId } = await setup();
     const payload = await payloadFor(pro.id);
-    await expect(saveFloorplan(pro, { ...payload, tables: payload.tables.slice(1) }, userId)).rejects.toThrow("fp.err.tableMismatch");
+    const dupTable = { ...payload, tables: payload.tables.map((t) => ({ ...t, name: "x" })) };
+    await expect(saveFloorplan(pro, dupTable, userId)).rejects.toThrow("fp.err.duplicateTable");
     const dup = { ...payload, areas: [...payload.areas, { ...payload.areas[0], id: "new:x", name: payload.areas[0].name.toUpperCase() }] };
     await expect(saveFloorplan(pro, dup, userId)).rejects.toThrow("fp.err.duplicateArea");
   });

@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, Phone, Radio, StickyNote, X } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { changeStatusAction } from "@/app/admin/[restaurant]/reservierungen/actions";
 import { useAdminT } from "@/components/admin/i18n-provider";
 import { StatusActions } from "@/components/admin/status-actions";
@@ -11,14 +11,20 @@ import { seatPositions } from "@/components/admin/floorplan/plan-shapes";
 import { Button } from "@/components/ui/button";
 import { isAdminKey, type AdminT } from "@/i18n/admin";
 import { canvasSize, rotatedBounds, tableCenter, type PlanTable } from "@/lib/floorplan";
+import { ChangeTableDialog } from "./change-table-dialog";
+import { TimelineView } from "./timeline-view";
+import { useMover, useReservationDrag, type DragState } from "./use-move";
 import {
-  LATE_AFTER_MIN,
+  isLate,
+  MOVABLE_STATUSES,
+  evaluateMove,
   SOON_WITHIN_MIN,
   formatMin,
   occupancyCurve,
   tableSnapshot,
   type LivePlanData,
   type LiveReservation,
+  type MoveVerdict,
   type TableSnapshot,
   type TableState,
 } from "@/lib/service-view";
@@ -91,10 +97,13 @@ function tableLines(t: AdminT, snap: TableSnapshot, at: number, maxChars: number
   }
 }
 
-export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: LivePlanData; canEditPlan: boolean }) {
+export type LiveView = "room" | "timeline";
+
+export function LivePlan({ slug, data, canEditPlan, initialView = "room" }: { slug: string; data: LivePlanData; canEditPlan: boolean; initialView?: LiveView }) {
   const { t } = useAdminT();
   const router = useRouter();
   const helpId = useId();
+  const moveHintId = useId();
   const { fromMin, toMin } = data;
   const clampTime = (m: number) => Math.min(toMin - STEP, Math.max(fromMin, m));
   const nowInWindow = data.isToday && data.nowMin >= fromMin && data.nowMin < toMin;
@@ -105,7 +114,22 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
   const [live, setLive] = useState(nowInWindow);
   const [manualAt, setManualAt] = useState(() => (nowInWindow ? data.nowMin : fromMin));
   const [selected, setSelected] = useState<string | null>(null);
+  const [view, setViewState] = useState<LiveView>(initialView);
   const aside = useRef<HTMLElement>(null);
+
+  // Ansicht in der Adresse merken (Neuladen, Lesezeichen) – ohne neue Serveranfrage
+  const setView = (v: LiveView) => {
+    setViewState(v);
+    const url = new URL(window.location.href);
+    if (v === "timeline") url.searchParams.set("ansicht", "zeitleiste");
+    else url.searchParams.delete("ansicht");
+    window.history.replaceState(null, "", url);
+  };
+
+  // Umsetzen: Ziehen auf einen Tisch bzw. eine Zeile, „Tisch wechseln“, Rückfragen, Rückgängig
+  const mover = useMover({ slug, t, reservations: data.reservations, tables: data.tables });
+  const { drag, begin, consumeClick } = useReservationDrag(useCallback((r: LiveReservation, tableId: string) => mover.request(r, [tableId]), [mover]));
+  const verdictFor = (tableId: string) => (drag ? evaluateMove(drag.r, [tableId], data.reservations, data.tables) : null);
 
   // Tablet/Handy: Seitenleiste steht unter dem Plan → nach Auswahl dorthin scrollen
   useEffect(() => {
@@ -132,10 +156,16 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
     return map;
   }, [data.reservations]);
 
-  const snapshots = useMemo(() => new Map(data.tables.map((tb) => [tb.id, tableSnapshot(byTable.get(tb.id) ?? [], at)])), [data.tables, byTable, at]);
+  // Echte Uhrzeit für "verspätet": heute die aktuelle, vergangene Tage immer, künftige nie
+  const today = data.isToday;
+  const realNow = today ? nowMin : data.nowMin > toMin ? Number.POSITIVE_INFINITY : Number.NEGATIVE_INFINITY;
+  const snapshots = useMemo(
+    () => new Map(data.tables.map((tb) => [tb.id, tableSnapshot(byTable.get(tb.id) ?? [], at, realNow)])),
+    [data.tables, byTable, at, realNow],
+  );
   const curve = useMemo(() => occupancyCurve(data.reservations, fromMin, toMin, STEP), [data.reservations, fromMin, toMin]);
   // Zuschnitt auf den genutzten Bereich (inkl. Stühle und Tagesleisten) – größere Darstellung als mit fester Leinwand
-  const view = useMemo(() => {
+  const box = useMemo(() => {
     const boxes = [
       ...data.areas.map((a) => ({ x: a.x, y: a.y, width: a.width, height: a.height })),
       ...data.tables.map((tb) => {
@@ -173,7 +203,7 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
     .filter((r) => ["CONFIRMED", "REQUESTED", "PENDING_PAYMENT"].includes(r.status) && r.startMin >= at && r.startMin <= at + SOON_WITHIN_MIN)
     .sort((a, b) => a.startMin - b.startMin);
   const overdue = data.reservations
-    .filter((r) => r.status === "CONFIRMED" && at >= r.startMin + LATE_AFTER_MIN && at < r.endMin)
+    .filter((r) => isLate(r, at, realNow))
     .sort((a, b) => a.startMin - b.startMin);
 
   const setTime = (m: number) => {
@@ -213,6 +243,22 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
               <Radio className={cn("size-3.5", live && "animate-pulse")} aria-hidden />
               {live ? t("live.live") : t("live.now")}
             </Button>
+            <div className="inline-flex rounded-md bg-muted p-0.5" role="group" aria-label={t("live.view")}>
+              {(["room", "timeline"] as const).map((v) => (
+                <button
+                  key={v}
+                  type="button"
+                  aria-pressed={view === v}
+                  onClick={() => setView(v)}
+                  className={cn(
+                    "rounded px-3 py-1 text-sm focus-visible:outline-2 focus-visible:outline-ring",
+                    view === v ? "bg-card font-medium shadow-sm" : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {t(v === "room" ? "live.view.room" : "live.view.timeline")}
+                </button>
+              ))}
+            </div>
             <div className="flex items-center gap-1">
               <Button type="button" size="icon-sm" variant="ghost" onClick={() => setTime(at - STEP)} aria-label={t("live.earlier")} disabled={at <= fromMin}>
                 <ChevronLeft />
@@ -280,10 +326,32 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
           </div>
         </div>
 
-        {/* Raumplan */}
+        {view === "timeline" ? (
+          <TimelineView
+            t={t}
+            areas={data.areas}
+            tables={data.tables}
+            byTable={byTable}
+            fromMin={fromMin}
+            toMin={toMin}
+            at={at}
+            nowMin={nowMin}
+            showNow={nowInWindow}
+            selected={selected}
+            drag={drag}
+            verdictFor={verdictFor}
+            onSelect={(id) => {
+              if (consumeClick()) return;
+              setSelected(id);
+            }}
+            onDragStart={begin}
+            statusText={(st) => statusText(t, st)}
+          />
+        ) : (
+        /* Raumplan */
         <div className="overflow-x-auto rounded-lg border bg-card">
           <svg
-            viewBox={`${view.x} ${view.y} ${view.width} ${view.height}`}
+            viewBox={`${box.x} ${box.y} ${box.width} ${box.height}`}
             className="block h-auto max-h-[78vh] w-full min-w-[720px] font-sans"
             role="group"
             aria-label={t("live.plan", { time: formatMin(at) })}
@@ -343,6 +411,11 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
               const span = toMin - fromMin;
               const xOf = (m: number) => stripX + (Math.min(Math.max(m, fromMin), toMin) - fromMin) / span * stripW;
               const dayRes = byTable.get(tb.id) ?? [];
+              // Gezogen wird die laufende Reservierung – beim Eindecken schon die nächste
+              const movableRes = [snap.state === "turnover" ? null : snap.current, snap.next].find((x) => x && MOVABLE_STATUSES.includes(x.status)) ?? null;
+              const dv = drag ? verdictFor(tb.id) : null;
+              const dragOver = drag?.over === tb.id;
+              const dropColor = !dv || dv.kind === "same" ? null : dv.kind === "blocked" ? "#6b1e2e" : dv.kind === "swap" || dv.overCapacity ? "#9c7a3c" : "#3f6b4f";
               const label = t("live.aria.table", {
                 name: tb.name,
                 state: t(`live.state.${snap.state}`),
@@ -355,15 +428,23 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
                   tabIndex={0}
                   aria-pressed={isSelected}
                   aria-label={label}
-                  className="cursor-pointer outline-none [&:focus-visible_.live-focus]:visible"
+                  aria-describedby={movableRes ? moveHintId : undefined}
+                  data-drop-table={tb.id}
+                  className={cn("outline-none [&:focus-visible_.live-focus]:visible", movableRes ? "cursor-grab active:cursor-grabbing" : "cursor-pointer")}
+                  style={{ touchAction: movableRes ? "none" : undefined, opacity: drag?.fromTableId === tb.id ? 0.45 : 1 }}
+                  onPointerDown={(e) => begin(e, movableRes, tb.id)}
                   onClick={(e) => {
                     e.stopPropagation();
+                    if (consumeClick()) return;
                     setSelected((s) => (s === tb.id ? null : tb.id));
                   }}
                   onKeyDown={(e) => onTableKey(e, tb.id)}
                 >
                   <g transform={`translate(${tb.x} ${tb.y}) rotate(${tb.rotation} ${tb.width / 2} ${tb.height / 2})`}>
                     <rect className="live-focus invisible" x={-16} y={-16} width={tb.width + 32} height={tb.height + 32} rx={12} fill="none" stroke="#6b1e2e" strokeWidth={2} strokeDasharray="5 4" />
+                    {drag && dropColor ? (
+                      <rect x={-14} y={-14} width={tb.width + 28} height={tb.height + 28} rx={12} fill={dropColor} fillOpacity={dragOver ? 0.22 : 0.07} stroke={dropColor} strokeWidth={dragOver ? 3 : 1} />
+                    ) : null}
                     {seatPositions(tb).map((s, i) => (
                       <circle key={i} cx={s.x} cy={s.y} r={6} fill={snap.state === "seated" ? "#9fbca9" : "#dcdfe3"} stroke="#8a919c" strokeWidth={0.6} />
                     ))}
@@ -417,6 +498,7 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
             })}
           </svg>
         </div>
+        )}
 
         {/* Legende: Zustände mit Text, nicht nur Farbe */}
         <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground" aria-label={t("live.legend")}>
@@ -430,6 +512,9 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
           ))}
           <span className="ml-auto">{data.isToday ? t("live.refreshed") : null}</span>
         </div>
+        <p id={moveHintId} className="text-sm text-muted-foreground">
+          {view === "timeline" ? t("live.tl.hint") : t("live.move.hint")}
+        </p>
         {data.autoLayout ? (
           <p className="text-sm text-muted-foreground">
             {t("live.autoLayout")} {canEditPlan ? <Link href={`/admin/${slug}/raumplan`} className="underline underline-offset-4">{t("live.editPlan")}</Link> : t("live.autoLayoutPro")}
@@ -464,7 +549,19 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
               ) : (
                 <ul className="space-y-3">
                   {selectedRes.map((r) => (
-                    <ReservationItem key={r.id} r={r} slug={slug} at={at} t={t} others={r.tableIds.filter((id) => id !== selectedTable.id).map(tableName)} />
+                    <ReservationItem
+                      key={r.id}
+                      r={r}
+                      slug={slug}
+                      at={at}
+                      t={t}
+                      others={r.tableIds.filter((id) => id !== selectedTable.id).map(tableName)}
+                      change={
+                        MOVABLE_STATUSES.includes(r.status) ? (
+                          <ChangeTableDialog r={r} t={t} areas={data.areas} tables={data.tables} reservations={data.reservations} onApply={(ids) => mover.request(r, ids)} />
+                        ) : null
+                      }
+                    />
                   ))}
                 </ul>
               )}
@@ -501,11 +598,36 @@ export function LivePlan({ slug, data, canEditPlan }: { slug: string; data: Live
         </section>
 
         <p className="text-sm">
-          <Link href={`/admin/${slug}/timeline?date=${data.date}`} className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+          <Link href={`/admin/${slug}/reservierungen?date=${data.date}`} className="text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
             {t("live.listView")}
           </Link>
         </p>
       </aside>
+      {mover.dialog}
+      {drag ? <DragGhost drag={drag} t={t} verdict={drag.over ? verdictFor(drag.over) : null} tableName={drag.over ? tableName(drag.over) : null} /> : null}
+    </div>
+  );
+}
+
+/** Vorschau am Zeiger beim Ziehen: wer wohin – und was passiert beim Loslassen. */
+function DragGhost({ drag, t, verdict, tableName }: { drag: DragState; t: AdminT; verdict: MoveVerdict | null; tableName: string | null }) {
+  const info =
+    !verdict || verdict.kind === "same"
+      ? null
+      : verdict.kind === "blocked"
+        ? { text: t("live.move.dropBlocked"), cls: "bg-bordeaux text-white" }
+        : verdict.kind === "swap"
+          ? { text: t("live.move.dropSwap", { name: verdict.other.guestName ?? "–" }), cls: "bg-messing text-white" }
+          : verdict.overCapacity
+            ? { text: t("live.move.dropSmall", { seats: verdict.seats }), cls: "bg-messing text-white" }
+            : { text: t("live.move.dropFree"), cls: "bg-salbei text-white" };
+  return (
+    <div className="pointer-events-none fixed z-50 -translate-x-1/2 -translate-y-[130%]" style={{ left: drag.x, top: drag.y }} aria-hidden>
+      <div className="rounded-md border bg-card px-3 py-1.5 text-sm shadow-lg">
+        <span className="font-medium">{drag.r.guestName ?? "–"}</span> · {drag.r.partySize} · {formatMin(drag.r.startMin)}
+        {tableName ? <span className="text-muted-foreground"> → {tableName}</span> : null}
+      </div>
+      {info ? <div className={cn("mt-1 w-fit rounded px-2 py-0.5 text-xs font-medium", info.cls)}>{info.text}</div> : null}
     </div>
   );
 }
@@ -524,7 +646,7 @@ function QuickItem({ r, label, tables, onSelect }: { r: LiveReservation; label: 
   );
 }
 
-function ReservationItem({ r, slug, at, t, others }: { r: LiveReservation; slug: string; at: number; t: AdminT; others: string[] }) {
+function ReservationItem({ r, slug, at, t, others, change }: { r: LiveReservation; slug: string; at: number; t: AdminT; others: string[]; change: ReactNode }) {
   const active = r.startMin <= at && at < r.endMin;
   return (
     <li className={cn("rounded-md border px-3 py-2.5 text-sm", active ? "border-[#1d2433]/40 bg-muted/40" : "border-border")}>
@@ -554,9 +676,10 @@ function ReservationItem({ r, slug, at, t, others }: { r: LiveReservation; slug:
           {t("live.details")}
         </Link>
       </div>
-      {r.allowed.length ? (
-        <div className="mt-2">
-          <StatusActions current={r.status} allowed={r.allowed} onChange={(to) => changeStatusAction(slug, r.id, to as never)} />
+      {r.allowed.length || change ? (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+          {r.allowed.length ? <StatusActions current={r.status} allowed={r.allowed} onChange={(to) => changeStatusAction(slug, r.id, to as never)} /> : null}
+          {change}
         </div>
       ) : null}
     </li>

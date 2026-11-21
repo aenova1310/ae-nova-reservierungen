@@ -48,6 +48,8 @@ export const common = defineMessages(
     "common.err.suspended": "Das Restaurant ist gesperrt.",
     "common.err.featureNotInPlan": "Diese Funktion ist im aktuellen Tarif nicht enthalten. Bitte auf Pro wechseln.",
     "common.err.tooMany": "Zu viele Anfragen. Bitte später erneut versuchen.",
+    "common.err.capacity": "Die gewählten Tische haben zu wenige Plätze für diese Gruppe.",
+    "common.err.notMovable": "Diese Reservierung kann nicht mehr umgesetzt werden.",
 
     "nav.main": "Hauptnavigation",
     "nav.menu": "Menü öffnen",
@@ -237,6 +239,8 @@ export const common = defineMessages(
     "common.err.suspended": "The restaurant is suspended.",
     "common.err.featureNotInPlan": "This feature is not included in your current plan. Please upgrade to Pro.",
     "common.err.tooMany": "Too many requests. Please try again later.",
+    "common.err.capacity": "The selected tables don't have enough seats for this party.",
+    "common.err.notMovable": "This reservation can no longer be moved.",
 
     "nav.main": "Main navigation",
     "nav.menu": "Open menu",

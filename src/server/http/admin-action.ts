@@ -17,6 +17,8 @@ const RESERVATION_MESSAGES: Partial<Record<ReservationErrorCode, AdminKey>> = {
   NOT_CANCELLABLE: "common.err.notCancellable",
   INVALID_TRANSITION: "common.err.invalidTransition",
   RESTAURANT_SUSPENDED: "common.err.suspended",
+  CAPACITY: "common.err.capacity",
+  NOT_MOVABLE: "common.err.notMovable",
 };
 
 /**
