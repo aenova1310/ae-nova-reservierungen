@@ -106,7 +106,10 @@ describe("Verschieben bewerten", () => {
 
   it("erkennt Tausch und blockiert bei mehreren Überschneidungen", () => {
     const b = res({ id: "b", tableIds: ["t2"], startMin: 19 * 60 + 30, endMin: 21 * 60, blockedMin: 21 * 60 + 15 });
-    expect(evaluateMove(a, ["t2"], [a, b], tables)).toMatchObject({ kind: "swap", other: b });
+    expect(evaluateMove(a, ["t2"], [a, b], tables)).toMatchObject({ kind: "swap", other: b, otherTo: ["t1"] });
+    // Kombination: die andere behält ihre übrigen Tische
+    const combo = res({ id: "combo", partySize: 5, tableIds: ["t2", "t3"], startMin: 19 * 60 + 30, endMin: 21 * 60, blockedMin: 21 * 60 + 15 });
+    expect(evaluateMove(a, ["t2"], [a, combo], tables)).toMatchObject({ kind: "swap", otherTo: ["t3", "t1"], otherOverCapacity: false });
     const c = res({ id: "c", tableIds: ["t2"], startMin: 21 * 60 + 15, endMin: 22 * 60, blockedMin: 22 * 60 + 15 });
     const late = res({ id: "late", tableIds: ["t1"], startMin: 18 * 60, endMin: 21 * 60 + 30, blockedMin: 21 * 60 + 45 });
     expect(evaluateMove(late, ["t2"], [late, b, c], tables)).toMatchObject({ kind: "blocked" });

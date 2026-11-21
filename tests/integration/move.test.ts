@@ -2,7 +2,7 @@ import { afterAll, beforeEach, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
 import { createReservation } from "@/server/reservations/create";
 import { ReservationError } from "@/server/reservations/errors";
-import { moveReservationTables } from "@/server/reservations/move";
+import { moveReservationTables, restoreTableAssignments } from "@/server/reservations/move";
 import { createRestaurant, DATE, guest, NOW, resetDatabase } from "../support/factory";
 
 beforeEach(resetDatabase);
@@ -56,9 +56,32 @@ describe("Reservierung auf andere Tische setzen", () => {
     expect(await activeTables(a.id)).toEqual([t1.id]); // unverändert (Transaktion zurückgerollt)
 
     const swapped = await moveReservationTables({ restaurantId: restaurant.id, reservationId: a.id, toTableIds: [t2.id], swapWithId: b.id, userId });
-    expect(swapped.swapped).toEqual({ reservationId: b.id, toTableIds: [t1.id] });
+    expect(swapped.swapped).toEqual({ reservationId: b.id, fromTableIds: [t2.id], toTableIds: [t1.id] });
     expect(await activeTables(a.id)).toEqual([t2.id]);
     expect(await activeTables(b.id)).toEqual([t1.id]);
+  });
+
+  it("Tausch mit einer Kombination: die andere behält ihre übrigen Tische, Rückgängig stellt alles genau her", async () => {
+    const { restaurant, t1, t2, t3, userId } = await setup();
+    const big = await book(restaurant.id, "19:00", 1, 4, t2.id);
+    await moveReservationTables({ restaurantId: restaurant.id, reservationId: big.id, toTableIds: [t2.id, t3.id], userId });
+    const small = await book(restaurant.id, "19:00", 2, 2, t1.id);
+
+    // small auf t2 ziehen → Tausch: big gibt t2 ab, behält t3 und bekommt t1
+    const moved = await moveReservationTables({ restaurantId: restaurant.id, reservationId: small.id, toTableIds: [t2.id], swapWithId: big.id, userId });
+    expect(await activeTables(small.id)).toEqual([t2.id]);
+    expect(await activeTables(big.id)).toEqual([t1.id, t3.id].sort());
+
+    await restoreTableAssignments({
+      restaurantId: restaurant.id,
+      userId,
+      assignments: [
+        { reservationId: small.id, tableIds: moved.fromTableIds },
+        { reservationId: big.id, tableIds: moved.swapped!.fromTableIds },
+      ],
+    });
+    expect(await activeTables(small.id)).toEqual([t1.id]);
+    expect(await activeTables(big.id)).toEqual([t2.id, t3.id].sort());
   });
 
   it("verlangt Bestätigung bei zu wenigen Plätzen und erlaubt Kombinationen", async () => {

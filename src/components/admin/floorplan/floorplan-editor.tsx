@@ -350,13 +350,14 @@ export function FloorplanEditor({
       window.setTimeout(() => (suppressPaletteClick.current = false), 0);
       onPaletteDrop(d.preset, e);
     };
+    const abort = () => setPaletteDrag(null);
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointercancel", abort);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointercancel", abort);
     };
   }, [paletteDragging]);
 

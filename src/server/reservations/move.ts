@@ -19,7 +19,8 @@ export interface MoveResult {
   /** Vorherige Tische (für „Rückgängig“). */
   fromTableIds: string[];
   toTableIds: string[];
-  swapped: { reservationId: string; toTableIds: string[] } | null;
+  /** Beim Tausch: die andere Reservierung mit ihren Tischen vorher und nachher. */
+  swapped: { reservationId: string; fromTableIds: string[]; toTableIds: string[] } | null;
 }
 
 async function loadMovable(tx: Tx, restaurantId: string, reservationId: string) {
@@ -37,8 +38,9 @@ async function assign(tx: Tx, restaurantId: string, r: Awaited<ReturnType<typeof
   // Zeitfenster der bisherigen Belegung übernehmen (inkl. Puffer bzw. vorzeitiger Freigabe)
   const startsAt = r.tables[0].startsAt;
   const blockedUntil = new Date(Math.max(...r.tables.map((t) => t.blockedUntil.getTime())));
-  // Alte Zeilen löschen statt deaktivieren: (Reservierung, Tisch) ist eindeutig, ein Zurückschieben muss möglich sein
-  await tx.reservationTable.deleteMany({ where: { reservationId: r.id, restaurantId } });
+  // Aktive Zeilen ersetzen; freigegebene (inaktive) bleiben als Historie – außer auf einem Zieltisch,
+  // denn (Reservierung, Tisch) ist eindeutig und ein Zurückschieben muss möglich sein
+  await tx.reservationTable.deleteMany({ where: { reservationId: r.id, restaurantId, OR: [{ active: true }, { tableId: { in: tableIds } }] } });
   await tx.reservationTable.createMany({
     data: tableIds.map((tableId) => ({ restaurantId, reservationId: r.id, tableId, startsAt, blockedUntil, active: true })),
   });
@@ -78,14 +80,20 @@ export async function moveReservationTables(params: {
       let swapped: MoveResult["swapped"] = null;
       if (params.swapWithId) {
         const other = await loadMovable(tx, params.restaurantId, params.swapWithId);
-        if (other.id === r.id || !other.tables.some((t) => toTableIds.includes(t.tableId))) throw new ReservationError("INVALID_CHOICE");
-        const otherSeats = (await tx.table.findMany({ where: { id: { in: fromTableIds } }, select: { maxCapacity: true } })).reduce((s, t) => s + t.maxCapacity, 0);
+        const otherFrom = other.tables.map((t) => t.tableId);
+        if (other.id === r.id || !otherFrom.some((id) => toTableIds.includes(id))) throw new ReservationError("INVALID_CHOICE");
+        // Die andere Reservierung gibt nur die Zieltische ab und bekommt dafür die bisherigen Tische
+        const otherTo = [...new Set([...otherFrom.filter((id) => !toTableIds.includes(id)), ...fromTableIds])];
+        const otherSeats = (await tx.table.findMany({ where: { id: { in: otherTo }, restaurantId: params.restaurantId }, select: { maxCapacity: true } })).reduce(
+          (s, t) => s + t.maxCapacity,
+          0,
+        );
         if (otherSeats < other.partySize && !params.allowOverCapacity) throw new ReservationError("CAPACITY");
         // Erst beide lösen, dann neu setzen – sonst blockieren sie sich gegenseitig
-        await tx.reservationTable.deleteMany({ where: { reservationId: other.id, restaurantId: params.restaurantId } });
+        await tx.reservationTable.deleteMany({ where: { reservationId: other.id, restaurantId: params.restaurantId, active: true } });
         await assign(tx, params.restaurantId, r, toTableIds);
-        await assign(tx, params.restaurantId, other, fromTableIds);
-        swapped = { reservationId: other.id, toTableIds: fromTableIds };
+        await assign(tx, params.restaurantId, other, otherTo);
+        swapped = { reservationId: other.id, fromTableIds: otherFrom, toTableIds: otherTo };
       } else {
         await assign(tx, params.restaurantId, r, toTableIds);
       }
@@ -100,6 +108,40 @@ export async function moveReservationTables(params: {
         },
       });
       return { fromTableIds, toTableIds, swapped };
+    });
+  } catch (error) {
+    if (isOverlapViolation(error)) throw new ReservationError("TABLE_TAKEN");
+    throw error;
+  }
+}
+
+/**
+ * „Rückgängig“: stellt die genauen Tische vorher wieder her – für eine oder
+ * (nach einem Tausch) zwei Reservierungen, in einer Transaktion.
+ */
+export async function restoreTableAssignments(params: {
+  restaurantId: string;
+  userId: string;
+  assignments: { reservationId: string; tableIds: string[] }[];
+}): Promise<void> {
+  if (params.assignments.length === 0 || params.assignments.length > 2) throw new ReservationError("INVALID_CHOICE");
+  try {
+    await db.$transaction(async (tx) => {
+      await lockRestaurant(tx, params.restaurantId);
+      const loaded = [];
+      for (const a of params.assignments) {
+        const r = await loadMovable(tx, params.restaurantId, a.reservationId);
+        const ids = [...new Set(a.tableIds)];
+        const ok = await tx.table.count({ where: { id: { in: ids }, restaurantId: params.restaurantId, active: true } });
+        if (ids.length === 0 || ok !== ids.length) throw new ReservationError("INVALID_CHOICE");
+        loaded.push({ r, ids });
+      }
+      // Erst alle lösen, dann setzen (sonst blockieren sich getauschte Reservierungen)
+      for (const { r } of loaded) await tx.reservationTable.deleteMany({ where: { reservationId: r.id, restaurantId: params.restaurantId, active: true } });
+      for (const { r, ids } of loaded) await assign(tx, params.restaurantId, r, ids);
+      await tx.auditLog.create({
+        data: { restaurantId: params.restaurantId, userId: params.userId, action: "reservation.tables_restored", entityId: loaded[0].r.id, meta: { assignments: params.assignments } },
+      });
     });
   } catch (error) {
     if (isOverlapViolation(error)) throw new ReservationError("TABLE_TAKEN");

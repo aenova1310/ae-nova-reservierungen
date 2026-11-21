@@ -7,6 +7,7 @@ import { db, type Tx } from "../db";
 import { mediaStorage } from "../media/storage";
 import { UserFacingError } from "../http/admin-action";
 import { requireFeature, type PlanCode } from "../plans/features";
+import { lockRestaurant } from "../reservations/create";
 
 /**
  * Raumplan: Laden und Speichern von Bereichs- und Tischgeometrie (Pro).
@@ -165,6 +166,8 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
   return db.$transaction(async (tx) => {
     // Gleichzeitiges Speichern desselben Plans serialisieren
     await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`floorplan:${restaurant.id}`}))`;
+    // Dieselbe Sperre wie Buchen und Umsetzen: kein Umsetzen auf einen Tisch, der gerade gelöscht wird
+    await lockRestaurant(tx, restaurant.id);
     const current = await readPlan(tx, restaurant.id);
     if (current.version !== payload.baseVersion) {
       throw new FloorplanError("fp.err.changed");
@@ -204,6 +207,12 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
       await tx.area.update({ where: { id: a.id, restaurantId: restaurant.id }, data: { name: `__umbenennen__${a.id}` } });
     }
 
+    // Entfernte Bereiche vorab umbenennen: ihr Name darf in derselben Speicherung neu vergeben werden
+    const removedAreas = currentAreaIds.filter((id) => !existingAreaIds.includes(id));
+    for (const id of removedAreas) {
+      await tx.area.update({ where: { id, restaurantId: restaurant.id }, data: { name: `__entfernt__${id}` } });
+    }
+
     // Neue Bereiche anlegen, temporäre IDs auf echte abbilden
     const idMap = new Map(existingAreaIds.map((id) => [id, id]));
     let sortOrder = current.areas.length;
@@ -224,7 +233,12 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
     for (const id of deletedIds) {
       const history = await tx.reservationTable.count({ where: { tableId: id } });
       if (history > 0) {
-        await tx.table.update({ where: { id, restaurantId: restaurant.id }, data: { active: false, onlineBookable: false } });
+        // Namen freigeben (eindeutig je Restaurant) – der Tisch bleibt nur für die Historie
+        const old = current.tables.find((x) => x.id === id)!;
+        await tx.table.update({
+          where: { id, restaurantId: restaurant.id },
+          data: { active: false, onlineBookable: false, name: `${old.name.slice(0, 30)} (alt ${id.slice(-4)})` },
+        });
         deactivated++;
       } else {
         const media = await tx.tableMedia.findUnique({ where: { tableId: id }, select: { storageKey: true, thumbKey: true } });
@@ -266,7 +280,6 @@ export async function saveFloorplan(restaurant: RestaurantRef, input: unknown, u
     }
 
     // Bereiche, die im Editor entfernt wurden – nur wenn keine Tische mehr darin stehen (auch deaktivierte)
-    const removedAreas = currentAreaIds.filter((id) => !existingAreaIds.includes(id));
     for (const id of removedAreas) {
       const remaining = await tx.table.count({ where: { areaId: id, restaurantId: restaurant.id } });
       if (remaining > 0) throw new FloorplanError("fp.err.areaNotEmpty", { name: current.areas.find((a) => a.id === id)?.name ?? "" });

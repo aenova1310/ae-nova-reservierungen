@@ -167,7 +167,7 @@ export type MoveVerdict =
   /** Zieltische im Zeitraum frei. */
   | { kind: "free"; seats: number; overCapacity: boolean }
   /** Genau eine andere Reservierung liegt dort – Tausch möglich. */
-  | { kind: "swap"; seats: number; overCapacity: boolean; other: LiveReservation; otherOverCapacity: boolean }
+  | { kind: "swap"; seats: number; overCapacity: boolean; other: LiveReservation; otherOverCapacity: boolean; otherTo: string[] }
   /** Mehrere Überschneidungen oder nicht tauschbar. */
   | { kind: "blocked"; conflicts: LiveReservation[] };
 
@@ -201,7 +201,9 @@ export function evaluateMove(
       (o) => o.id !== r.id && o.id !== other.id && OCCUPYING_FOR_MOVE.includes(o.status) && o.tableIds.some((id) => r.tableIds.includes(id)) && o.startMin < other.blockedMin && other.startMin < o.blockedMin,
     );
     if (!otherBlocked) {
-      return { kind: "swap", seats, overCapacity: seats < r.partySize, other, otherOverCapacity: seatsOf(r.tableIds) < other.partySize };
+      // Wie der Server: die andere Reservierung behält ihre übrigen Tische und bekommt die bisherigen dazu
+      const otherTo = [...new Set([...other.tableIds.filter((id) => !targetIds.includes(id)), ...r.tableIds])];
+      return { kind: "swap", seats, overCapacity: seats < r.partySize, other, otherOverCapacity: seatsOf(otherTo) < other.partySize, otherTo };
     }
   }
   return { kind: "blocked", conflicts };

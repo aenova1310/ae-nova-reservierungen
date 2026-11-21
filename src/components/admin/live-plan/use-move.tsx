@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition, type PointerEvent as ReactPointerEvent } from "react";
 import { toast } from "sonner";
-import { moveTablesAction } from "@/app/admin/[restaurant]/reservierungen/actions";
+import { moveTablesAction, undoMoveAction } from "@/app/admin/[restaurant]/reservierungen/actions";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogTitle } from "@/components/ui/dialog";
 import type { AdminT } from "@/i18n/admin";
@@ -34,18 +34,20 @@ export function useMover({ slug, t, reservations, tables }: { slug: string; t: A
       start(async () => {
         const result = await moveTablesAction(slug, r.id, toIds, { swapWithId: opts.swapWith?.id ?? null, allowOverCapacity: opts.allowOverCapacity });
         if (result.ok) {
-          const from = r.tableIds;
+          const undo = result.undo;
           toast.success(result.message, {
-            action: {
-              label: t("live.move.undo"),
-              // Rückgängig = zurück auf die alten Tische (bei Tausch wieder zurücktauschen)
-              onClick: () =>
-                start(async () => {
-                  const undo = await moveTablesAction(slug, r.id, from, { swapWithId: opts.swapWith?.id ?? null, allowOverCapacity: true });
-                  if (undo.ok) toast.success(t("live.move.undone"));
-                  else toast.error(undo.error);
-                }),
-            },
+            action: undo
+              ? {
+                  label: t("live.move.undo"),
+                  // Rückgängig = genau die Tische vorher (bei Tausch für beide Reservierungen)
+                  onClick: () =>
+                    start(async () => {
+                      const back = await undoMoveAction(slug, undo);
+                      if (back?.ok) toast.success(back.message ?? t("live.move.undone"));
+                      else if (back) toast.error(back.error);
+                    }),
+                }
+              : undefined,
           });
         } else if (result.code === "CAPACITY") {
           // Kann passieren, wenn sich die Daten seit dem Laden geändert haben
@@ -169,15 +171,20 @@ export function useReservationDrag(onDrop: (r: LiveReservation, tableId: string)
         if (d.over && d.over !== d.fromTableId) onDrop(d.r, d.over);
       }
     };
-    const cancel = (e: KeyboardEvent) => e.key === "Escape" && setDrag(null);
+    // Abgebrochene Geste (Browser übernimmt z. B. das Scrollen): nichts ausführen
+    const abort = () => {
+      origin.current = null;
+      setDrag(null);
+    };
+    const cancel = (e: KeyboardEvent) => e.key === "Escape" && abort();
     window.addEventListener("pointermove", move);
     window.addEventListener("pointerup", up);
-    window.addEventListener("pointercancel", up);
+    window.addEventListener("pointercancel", abort);
     window.addEventListener("keydown", cancel);
     return () => {
       window.removeEventListener("pointermove", move);
       window.removeEventListener("pointerup", up);
-      window.removeEventListener("pointercancel", up);
+      window.removeEventListener("pointercancel", abort);
       window.removeEventListener("keydown", cancel);
     };
   }, [dragging, onDrop, setDrag]);

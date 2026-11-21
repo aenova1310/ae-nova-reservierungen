@@ -11,7 +11,7 @@ import { formObject, runAction } from "@/server/http/admin-action";
 import { createReservation } from "@/server/reservations/create";
 import { ReservationError } from "@/server/reservations/errors";
 import { cancelReservation, modifyReservation } from "@/server/reservations/manage";
-import { moveReservationTables } from "@/server/reservations/move";
+import { moveReservationTables, restoreTableAssignments } from "@/server/reservations/move";
 import { changeReservationStatus, releaseTablesNow, type ReservationStatus } from "@/server/reservations/status";
 import { requireRestaurantAccess } from "@/server/tenancy/access";
 
@@ -115,7 +115,11 @@ export async function updateInternalNotesAction(slug: string, reservationId: str
   });
 }
 
-export type MoveTablesResult = NonNullable<ActionResult> & { code?: string };
+export type MoveTablesResult = NonNullable<ActionResult> & {
+  code?: string;
+  /** Für „Rückgängig“: genaue Tische vorher (bei Tausch für beide Reservierungen). */
+  undo?: { reservationId: string; tableIds: string[] }[];
+};
 
 /**
  * Reservierung auf andere Tische setzen (Ziehen im Tischplan, „Tisch wechseln“).
@@ -128,6 +132,7 @@ export async function moveTablesAction(
   opts: { swapWithId?: string | null; allowOverCapacity?: boolean } = {},
 ): Promise<MoveTablesResult> {
   let code: string | undefined;
+  let undo: MoveTablesResult["undo"];
   const result = await runAction(async (t) => {
     const { restaurant, user } = await requireRestaurantAccess(slug);
     try {
@@ -140,13 +145,26 @@ export async function moveTablesAction(
         userId: user.id,
       });
       refresh(slug);
+      undo = [{ reservationId, tableIds: moved.fromTableIds }];
+      if (moved.swapped) undo.push({ reservationId: moved.swapped.reservationId, tableIds: moved.swapped.fromTableIds });
       return moved.swapped ? t("live.move.swapped") : t("live.move.moved");
     } catch (error) {
       if (error instanceof ReservationError) code = error.code;
       throw error;
     }
   });
-  return result?.ok ? result : { ...(result ?? { ok: false, error: "" }), code };
+  return result?.ok ? { ...result, undo } : { ...(result ?? { ok: false, error: "" }), code };
+}
+
+/** „Rückgängig“ nach dem Umsetzen: genaue vorherige Tische wiederherstellen. */
+export async function undoMoveAction(slug: string, assignments: { reservationId: string; tableIds: string[] }[]) {
+  return runAction(async (t) => {
+    const { restaurant, user } = await requireRestaurantAccess(slug);
+    const parsed = z.array(z.object({ reservationId: z.string().min(1).max(64), tableIds: z.array(z.string().min(1).max(64)).min(1).max(8) })).min(1).max(2).parse(assignments);
+    await restoreTableAssignments({ restaurantId: restaurant.id, userId: user.id, assignments: parsed });
+    refresh(slug);
+    return t("live.move.undone");
+  });
 }
 
 export async function releaseTablesAction(slug: string, reservationId: string) {

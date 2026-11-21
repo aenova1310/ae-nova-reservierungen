@@ -355,7 +355,11 @@ export function LivePlan({ slug, data, canEditPlan, initialView = "room" }: { sl
             className="block h-auto max-h-[78vh] w-full min-w-[720px] font-sans"
             role="group"
             aria-label={t("live.plan", { time: formatMin(at) })}
-            onClick={() => setSelected(null)}
+            onClick={() => {
+              // Der Klick nach dem Ablegen landet auf der Fläche – Auswahl dann behalten
+              if (consumeClick()) return;
+              setSelected(null);
+            }}
           >
             <defs>
               <pattern id="live-hatch" width="8" height="8" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">

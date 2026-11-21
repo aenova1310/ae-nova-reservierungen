@@ -87,10 +87,12 @@ describe("Tische im Editor anlegen, ändern, löschen", () => {
     expect(saved.tables.find((t) => t.id === t1.id)).toMatchObject({ active: false });
     expect(saved.tables.find((t) => t.id === t2.id)).toBeUndefined();
 
-    // Name eines deaktivierten Tisches ist weiter belegt
+    // Der Name des deaktivierten Tisches ist sofort wieder frei (auch in derselben Speicherung)
+    expect(saved.tables.find((t) => t.id === t1.id)?.name).not.toBe(t1.name);
     const again = await payloadFor(pro.id);
     again.tables.push({ id: "newt:x", areaId: again.areas[0].id, name: t1.name, ...tableAt(100) });
-    await expect(saveFloorplan(pro, again, userId)).rejects.toThrow("fp.err.nameOfInactive");
+    const reused = await saveFloorplan(pro, again, userId);
+    expect(reused.tables.find((t) => t.name === t1.name)).toMatchObject({ active: true });
   });
 
   it("verhindert das Löschen bei kommenden Reservierungen", async () => {
@@ -99,6 +101,23 @@ describe("Tische im Editor anlegen, ändern, löschen", () => {
     const payload = await payloadFor(pro.id);
     await expect(saveFloorplan(pro, { ...payload, tables: payload.tables.slice(1) }, userId)).rejects.toThrow("fp.err.tableHasReservations");
     expect(await db.table.count({ where: { id: tables[0].id, active: true } })).toBe(1);
+  });
+
+  it("löscht einen Tisch mit Historie und vergibt seinen Namen in derselben Speicherung neu", async () => {
+    const { pro, tables, userId } = await setup();
+    await bookOn(pro.id, tables[1].id, new Date(Date.now() - 86_400_000));
+    const payload = await payloadFor(pro.id);
+    const keep = payload.tables.filter((t) => t.id !== tables[1].id);
+    keep.push({ id: "newt:n", areaId: payload.areas[0].id, name: tables[1].name, ...tableAt(250) });
+    const saved = await saveFloorplan(pro, { ...payload, tables: keep }, userId);
+    expect(saved.tables.filter((t) => t.active).map((t) => t.name).sort()).toEqual([tables[0].name, tables[1].name].sort());
+
+    // Bereich entfernen und gleichnamigen neu anlegen – ebenfalls in einer Speicherung
+    await db.area.create({ data: { restaurantId: pro.id, name: "Bar" } });
+    const p2 = await payloadFor(pro.id);
+    const areas = [...p2.areas.filter((a) => a.name !== "Bar"), { id: "new:b", name: "Bar", x: 900, y: 0, width: 300, height: 200, color: null }];
+    const s2 = await saveFloorplan(pro, { ...p2, areas }, userId);
+    expect(s2.areas.filter((a) => a.name === "Bar")).toHaveLength(1);
   });
 
   it("entfernt nur leere Bereiche", async () => {
